@@ -50,8 +50,10 @@ to stryke, then layers HTML extraction on top. Two halves:
 - **Network** (`fetch`, `crawl`, `links`, `sitemap`) drive spider through a
   single embedded tokio runtime owned by the cdylib.
 - **Pure** (`extract`, `extract_table`, `extract_links`, `extract_attrs`,
-  `structured`) run html5ever-backed CSS selection over an HTML string with
-  no network — the unit-tested core, usable on any HTML you already have.
+  `extract_text`, `extract_meta`, `extract_images`, `extract_feeds`,
+  `structured`, `select`, `absolutize`) run html5ever-backed CSS selection over
+  an HTML string with no network — the unit-tested core, usable on any HTML you
+  already have.
 
 ```stryke
 use Scrape
@@ -146,11 +148,17 @@ Scrape::links    $url, %opts → { count, links => [ url, ... ] }
 Scrape::sitemap  $url, %opts → { count, pages => [ ... ] }
 
 # Pure extraction (no network)
-Scrape::extract        $html, \%fields, %opts → \%record   # opts: all
-Scrape::extract_table  $html, %opts → [ \%row, ... ]       # opts: selector
-Scrape::extract_links  $html, %opts → [ { text, href }, ... ]   # opts: base
-Scrape::extract_attrs  $html, $selector, $attr → [ value, ... ]
-Scrape::structured     $html → { jsonld => [...], opengraph => {...}, twitter => {...} }
+Scrape::extract         $html, \%fields, %opts → \%record   # opts: all
+Scrape::extract_table   $html, %opts → [ \%row, ... ]       # opts: selector
+Scrape::extract_links   $html, %opts → [ { text, href }, ... ]   # opts: base
+Scrape::extract_attrs   $html, $selector, $attr → [ value, ... ]
+Scrape::extract_text    $html, %opts → $string              # opts: selector (default body)
+Scrape::extract_meta    $html → { title, description, canonical, ... }
+Scrape::extract_images  $html, %opts → [ { src, alt }, ... ]     # opts: base
+Scrape::extract_feeds   $html, %opts → [ { title, href, type }, ... ]   # opts: base
+Scrape::structured      $html → { jsonld => [...], opengraph => {...}, twitter => {...} }
+Scrape::select          $html, $selector, %opts → [ html, ... ]   # opts: inner
+Scrape::absolutize      $base, $href → $url
 
 Scrape::version → $semver
 ```

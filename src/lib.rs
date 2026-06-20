@@ -348,6 +348,153 @@ fn extract_structured(html: &str) -> Result<Value> {
     }))
 }
 
+/// Collapse a selected element's visible text, skipping `script`/`style`/
+/// `noscript` subtrees so embedded JS/CSS never leaks into readable output.
+fn visible_text(el: &ElementRef) -> String {
+    let mut out = String::new();
+    for node in el.descendants() {
+        if let Some(txt) = node.value().as_text() {
+            let skip = node.ancestors().any(|a| {
+                a.value()
+                    .as_element()
+                    .map(|e| matches!(e.name(), "script" | "style" | "noscript"))
+                    .unwrap_or(false)
+            });
+            if !skip {
+                out.push_str(txt);
+                out.push(' ');
+            }
+        }
+    }
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Readable text of `selector` (default `body`), tags stripped and whitespace
+/// collapsed. Returns a single string.
+fn extract_text(html: &str, selector: Option<&str>) -> Result<Value> {
+    let doc = Html::parse_document(html);
+    let sel =
+        Selector::parse(selector.unwrap_or("body")).map_err(|e| anyhow!("bad selector: {e:?}"))?;
+    let joined = doc
+        .select(&sel)
+        .map(|el| visible_text(&el))
+        .collect::<Vec<_>>()
+        .join(" ");
+    Ok(json!(joined.split_whitespace().collect::<Vec<_>>().join(" ")))
+}
+
+/// Standard `<head>` metadata: `title` plus the common SEO `<meta>`/`<link>`
+/// fields (`description`, `keywords`, `robots`, `viewport`, `generator`,
+/// `charset`, `canonical`). Only present fields appear in the result.
+fn extract_meta(html: &str) -> Result<Value> {
+    let doc = Html::parse_document(html);
+    let mut o = Map::new();
+
+    let title_sel = Selector::parse("title").unwrap();
+    if let Some(el) = doc.select(&title_sel).next() {
+        o.insert("title".into(), json!(clean_text(&el)));
+    }
+
+    let meta_sel = Selector::parse("meta").unwrap();
+    for el in doc.select(&meta_sel) {
+        if let Some(charset) = el.value().attr("charset") {
+            o.insert("charset".into(), json!(charset));
+        }
+        if let (Some(name), Some(content)) = (el.value().attr("name"), el.value().attr("content")) {
+            match name.to_ascii_lowercase().as_str() {
+                "description" => o.insert("description".into(), json!(content)),
+                "keywords" => o.insert("keywords".into(), json!(content)),
+                "robots" => o.insert("robots".into(), json!(content)),
+                "viewport" => o.insert("viewport".into(), json!(content)),
+                "generator" => o.insert("generator".into(), json!(content)),
+                _ => None,
+            };
+        }
+    }
+
+    let canon_sel = Selector::parse(r#"link[rel="canonical"]"#).unwrap();
+    if let Some(href) = doc
+        .select(&canon_sel)
+        .next()
+        .and_then(|el| el.value().attr("href"))
+    {
+        o.insert("canonical".into(), json!(href));
+    }
+
+    Ok(Value::Object(o))
+}
+
+/// Resolve an `href` against an optional `base`; relative URLs that cannot be
+/// resolved are dropped.
+fn resolve(base: &Option<Url>, href: &str) -> Option<String> {
+    match base {
+        Some(b) => b.join(href).ok().map(|u| u.to_string()),
+        None => Some(href.to_string()),
+    }
+}
+
+/// Build the optional base `Url` shared by the image/feed/link resolvers.
+fn parse_base(base: Option<&str>) -> Result<Option<Url>> {
+    match base {
+        Some(b) => Ok(Some(
+            Url::parse(b).map_err(|e| anyhow!("bad base url {b:?}: {e}"))?,
+        )),
+        None => Ok(None),
+    }
+}
+
+/// Every `<img src>` as `{ src, alt }`. With `base`, `src` is absolutised.
+fn extract_images(html: &str, base: Option<&str>) -> Result<Value> {
+    let doc = Html::parse_document(html);
+    let sel = Selector::parse("img[src]").unwrap();
+    let base_url = parse_base(base)?;
+    let mut out = Vec::new();
+    for el in doc.select(&sel) {
+        let Some(src) = el.value().attr("src") else {
+            continue;
+        };
+        let Some(resolved) = resolve(&base_url, src) else {
+            continue;
+        };
+        out.push(json!({ "src": resolved, "alt": el.value().attr("alt").unwrap_or("") }));
+    }
+    Ok(Value::Array(out))
+}
+
+/// RSS/Atom feed `<link rel="alternate">` discovery as `{ title, href, type }`.
+fn extract_feeds(html: &str, base: Option<&str>) -> Result<Value> {
+    let doc = Html::parse_document(html);
+    let sel = Selector::parse(r#"link[rel="alternate"]"#).unwrap();
+    let base_url = parse_base(base)?;
+    let mut out = Vec::new();
+    for el in doc.select(&sel) {
+        let ty = el.value().attr("type").unwrap_or("");
+        if !(ty.contains("rss") || ty.contains("atom") || ty.contains("xml")) {
+            continue;
+        }
+        let Some(href) = el.value().attr("href") else {
+            continue;
+        };
+        let Some(resolved) = resolve(&base_url, href) else {
+            continue;
+        };
+        out.push(json!({ "title": el.value().attr("title").unwrap_or(""), "href": resolved, "type": ty }));
+    }
+    Ok(Value::Array(out))
+}
+
+/// Outer (default) or inner HTML of every element matching `selector`.
+fn select_html(html: &str, selector: &str, inner: bool) -> Result<Value> {
+    let doc = Html::parse_document(html);
+    let sel = Selector::parse(selector).map_err(|e| anyhow!("bad selector {selector:?}: {e:?}"))?;
+    let out: Vec<Value> = doc
+        .select(&sel)
+        .map(|el| if inner { el.inner_html() } else { el.html() })
+        .map(Value::String)
+        .collect();
+    Ok(Value::Array(out))
+}
+
 // ── exports: version ─────────────────────────────────────────────────────────
 
 #[no_mangle]
@@ -501,6 +648,88 @@ pub extern "C" fn scrape__structured(args: *const c_char) -> *const c_char {
     })
 }
 
+#[no_mangle]
+pub extern "C" fn scrape__extract_text(args: *const c_char) -> *const c_char {
+    ffi_call(args, |v| {
+        let html = v
+            .get("html")
+            .and_then(|x| x.as_str())
+            .ok_or_else(|| anyhow!("missing html"))?;
+        let selector = v.get("selector").and_then(|x| x.as_str());
+        Ok(json!({ "text": extract_text(html, selector)? }))
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn scrape__extract_meta(args: *const c_char) -> *const c_char {
+    ffi_call(args, |v| {
+        let html = v
+            .get("html")
+            .and_then(|x| x.as_str())
+            .ok_or_else(|| anyhow!("missing html"))?;
+        Ok(json!({ "meta": extract_meta(html)? }))
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn scrape__extract_images(args: *const c_char) -> *const c_char {
+    ffi_call(args, |v| {
+        let html = v
+            .get("html")
+            .and_then(|x| x.as_str())
+            .ok_or_else(|| anyhow!("missing html"))?;
+        let base = v.get("base").and_then(|x| x.as_str());
+        Ok(json!({ "images": extract_images(html, base)? }))
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn scrape__extract_feeds(args: *const c_char) -> *const c_char {
+    ffi_call(args, |v| {
+        let html = v
+            .get("html")
+            .and_then(|x| x.as_str())
+            .ok_or_else(|| anyhow!("missing html"))?;
+        let base = v.get("base").and_then(|x| x.as_str());
+        Ok(json!({ "feeds": extract_feeds(html, base)? }))
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn scrape__absolutize(args: *const c_char) -> *const c_char {
+    ffi_call(args, |v| {
+        let base = v
+            .get("base")
+            .and_then(|x| x.as_str())
+            .ok_or_else(|| anyhow!("missing base"))?;
+        let href = v
+            .get("href")
+            .and_then(|x| x.as_str())
+            .ok_or_else(|| anyhow!("missing href"))?;
+        let b = Url::parse(base).map_err(|e| anyhow!("bad base url {base:?}: {e}"))?;
+        let u = b
+            .join(href)
+            .map_err(|e| anyhow!("cannot resolve {href:?}: {e}"))?;
+        Ok(json!({ "url": u.to_string() }))
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn scrape__select(args: *const c_char) -> *const c_char {
+    ffi_call(args, |v| {
+        let html = v
+            .get("html")
+            .and_then(|x| x.as_str())
+            .ok_or_else(|| anyhow!("missing html"))?;
+        let selector = v
+            .get("selector")
+            .and_then(|x| x.as_str())
+            .ok_or_else(|| anyhow!("missing selector"))?;
+        let inner = v.get("inner").and_then(|x| x.as_bool()).unwrap_or(false);
+        Ok(json!({ "html": select_html(html, selector, inner)? }))
+    })
+}
+
 // ── unit tests (pure engines; no network — run in CI) ────────────────────────
 
 #[cfg(test)]
@@ -600,5 +829,74 @@ mod tests {
         assert_eq!(v["opengraph"]["title"], json!("Widget"));
         assert_eq!(v["opengraph"]["type"], json!("product"));
         assert_eq!(v["twitter"]["card"], json!("summary"));
+    }
+
+    #[test]
+    fn text_strips_tags_and_skips_script() {
+        let html = r#"<body><h1>Hi</h1><p>there  world</p><script>var x=1;</script></body>"#;
+        let v = extract_text(html, None).unwrap();
+        assert_eq!(v, json!("Hi there world"));
+    }
+
+    #[test]
+    fn text_scopes_to_selector() {
+        let html = r#"<body><nav>skip me</nav><main>keep this</main></body>"#;
+        let v = extract_text(html, Some("main")).unwrap();
+        assert_eq!(v, json!("keep this"));
+    }
+
+    #[test]
+    fn meta_pulls_title_description_canonical() {
+        let html = r##"<html><head>
+            <title>My Page</title>
+            <meta name="description" content="A page">
+            <meta name="viewport" content="width=device-width">
+            <link rel="canonical" href="https://ex.com/p">
+        </head><body></body></html>"##;
+        let v = extract_meta(html).unwrap();
+        assert_eq!(v["title"], json!("My Page"));
+        assert_eq!(v["description"], json!("A page"));
+        assert_eq!(v["viewport"], json!("width=device-width"));
+        assert_eq!(v["canonical"], json!("https://ex.com/p"));
+        assert_eq!(v.get("keywords"), None);
+    }
+
+    #[test]
+    fn images_resolve_against_base() {
+        let html = r#"<body><img src="/a.png" alt="A"><img src="b.jpg"></body>"#;
+        let v = extract_images(html, Some("https://ex.com/dir/")).unwrap();
+        let arr = v.as_array().unwrap();
+        assert_eq!(arr[0], json!({"src": "https://ex.com/a.png", "alt": "A"}));
+        assert_eq!(arr[1], json!({"src": "https://ex.com/dir/b.jpg", "alt": ""}));
+    }
+
+    #[test]
+    fn feeds_match_rss_and_atom_only() {
+        let html = r##"<head>
+            <link rel="alternate" type="application/rss+xml" title="RSS" href="/feed.xml">
+            <link rel="alternate" type="application/atom+xml" href="/atom">
+            <link rel="alternate" type="text/html" href="/other">
+        </head>"##;
+        let v = extract_feeds(html, Some("https://ex.com/")).unwrap();
+        let arr = v.as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr[0]["href"], json!("https://ex.com/feed.xml"));
+        assert_eq!(arr[0]["title"], json!("RSS"));
+        assert_eq!(arr[1]["href"], json!("https://ex.com/atom"));
+    }
+
+    #[test]
+    fn absolutize_resolves_relative() {
+        let b = Url::parse("https://site.test/dir/page").unwrap();
+        assert_eq!(b.join("../x.html").unwrap().to_string(), "https://site.test/x.html");
+    }
+
+    #[test]
+    fn select_returns_inner_and_outer_html() {
+        let html = r#"<body><span class="a">hi</span><span class="a">yo</span></body>"#;
+        let outer = select_html(html, "span.a", false).unwrap();
+        assert_eq!(outer[0], json!(r#"<span class="a">hi</span>"#));
+        let inner = select_html(html, "span.a", true).unwrap();
+        assert_eq!(inner, json!(["hi", "yo"]));
     }
 }

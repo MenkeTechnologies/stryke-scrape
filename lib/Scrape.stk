@@ -108,3 +108,41 @@ fn Scrape::extract_attrs ($html, $selector, $attr) {
 fn Scrape::structured ($html) {
     Scrape::_decode("structured", scrape__structured(to_json({ html => $html })))
 }
+
+## Readable text of %opts{selector} (default `body`): tags stripped, whitespace
+## collapsed, script/style/noscript skipped. Returns a single string.
+fn Scrape::extract_text ($html, %opts) {
+    val $r = { html => $html, selector => $opts{selector} }
+    Scrape::_decode("extract_text", scrape__extract_text(to_json($r)))->{text}
+}
+
+## Standard head metadata: title + present SEO meta/link fields (description,
+## keywords, robots, viewport, generator, charset, canonical).
+fn Scrape::extract_meta ($html) {
+    Scrape::_decode("extract_meta", scrape__extract_meta(to_json({ html => $html })))->{meta}
+}
+
+## Every `<img src>` as `{ src, alt }`. With %opts{base}, src is absolutised.
+fn Scrape::extract_images ($html, %opts) {
+    val $r = { html => $html, base => $opts{base} }
+    Scrape::_decode("extract_images", scrape__extract_images(to_json($r)))->{images}
+}
+
+## RSS/Atom feed `<link rel="alternate">` discovery as `{ title, href, type }`.
+## With %opts{base}, href is absolutised.
+fn Scrape::extract_feeds ($html, %opts) {
+    val $r = { html => $html, base => $opts{base} }
+    Scrape::_decode("extract_feeds", scrape__extract_feeds(to_json($r)))->{feeds}
+}
+
+## Resolve $href against $base, returning the absolute URL.
+fn Scrape::absolutize ($base, $href) {
+    val $r = { base => $base, href => $href }
+    Scrape::_decode("absolutize", scrape__absolutize(to_json($r)))->{url}
+}
+
+## Outer HTML (or inner with %opts{inner}) of every element matching $selector.
+fn Scrape::select ($html, $selector, %opts) {
+    val $r = { html => $html, selector => $selector, inner => ($opts{inner} // 0) }
+    Scrape::_decode("select", scrape__select(to_json($r)))->{html}
+}

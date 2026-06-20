@@ -98,7 +98,13 @@ p $res-&gt;{count}          # pages fetched, robots respected</code></pre>
           <tr><td>extract_table</td><td><code>&lt;table&gt;</code> &rarr; array of header-keyed row dicts.</td></tr>
           <tr><td>extract_links</td><td>every <code>&lt;a href&gt;</code> as <code>{ text, href }</code>, resolved against a <code>base</code>.</td></tr>
           <tr><td>extract_attrs</td><td>collect one attribute across every match of a selector.</td></tr>
+          <tr><td>extract_text</td><td>readable text of a selector (default <code>body</code>) &mdash; tags stripped, script/style skipped.</td></tr>
+          <tr><td>extract_meta</td><td>head metadata: title, description, keywords, canonical, robots, viewport, charset.</td></tr>
+          <tr><td>extract_images</td><td>every <code>&lt;img&gt;</code> as <code>{ src, alt }</code>, resolved against a <code>base</code>.</td></tr>
+          <tr><td>extract_feeds</td><td>RSS/Atom <code>&lt;link rel="alternate"&gt;</code> feed discovery.</td></tr>
           <tr><td>structured</td><td>JSON-LD blocks + OpenGraph + Twitter card metadata.</td></tr>
+          <tr><td>select</td><td>outer (or <code>inner</code>) HTML of every element matching a selector.</td></tr>
+          <tr><td>absolutize</td><td>resolve a relative <code>href</code> against a <code>base</code> URL.</td></tr>
         </table>
       </section>
 
@@ -111,7 +117,8 @@ p $res-&gt;{count}          # pages fetched, robots respected</code></pre>
         <h2>API surface</h2>
         <table class="example-tbl">
           <tr><td>Network</td><td><code>fetch</code>, <code>crawl</code>, <code>links</code>, <code>sitemap</code></td></tr>
-          <tr><td>Extract</td><td><code>extract</code>, <code>extract_table</code>, <code>extract_links</code>, <code>extract_attrs</code>, <code>structured</code></td></tr>
+          <tr><td>Extract</td><td><code>extract</code>, <code>extract_table</code>, <code>extract_links</code>, <code>extract_attrs</code>, <code>extract_text</code>, <code>extract_meta</code>, <code>extract_images</code>, <code>extract_feeds</code>, <code>structured</code></td></tr>
+          <tr><td>Utility</td><td><code>select</code>, <code>absolutize</code>, <code>version</code></td></tr>
         </table>
         <p>The full API lives in the <a href="https://github.com/MenkeTechnologies/stryke-scrape#readme" target="_blank" rel="noopener noreferrer">README</a>.</p>
       </section>

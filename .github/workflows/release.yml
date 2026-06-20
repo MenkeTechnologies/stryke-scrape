@@ -17,8 +17,24 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # Create the release exactly once, before the matrix, so the build jobs only
+  # ever *upload* to an existing release — eliminating the concurrent-create
+  # race where parallel jobs collide on "tag_name already_exists".
+  create_release:
+    name: Create release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create release if absent (idempotent)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ -n "${{ inputs.tag }}" ]]; then TAG="${{ inputs.tag }}"; else TAG="${GITHUB_REF##*/}"; fi
+          gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1 \
+            || gh release create "$TAG" --repo "${{ github.repository }}" --title "$TAG" --notes "Release $TAG"
+
   build:
     name: Build ${{ matrix.target }}
+    needs: create_release
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     continue-on-error: ${{ matrix.allow_failure || false }}

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark light">
   <meta name="description" content="stryke-scrape engineering report — the spider crawl engine behind one embedded tokio runtime, the JSON FFI bridge, and the pure html5ever extraction engines (CSS, tables, links, structured data).">
-  <title>stryke-scrape — Engineering report</title>
+  <title>stryke-scrape — Engineering Report</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&amp;family=Share+Tech+Mono&amp;display=swap" rel="stylesheet">
@@ -13,92 +13,139 @@
   <link rel="stylesheet" href="tutorial.css">
   <style>
     .tutorial-main { max-width: 68rem; }
+    .stat-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+      gap: 0.5rem;
+      margin: 1rem 0;
+    }
+    .stat-card {
+      border: 1px solid var(--border);
+      border-left: 2px solid var(--cyan);
+      padding: 0.65rem 0.85rem;
+      background: color-mix(in srgb, var(--bg-card) 92%, transparent);
+      border-radius: 2px;
+    }
+    .stat-val {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--accent);
+    }
+    .stat-val.cyan { color: var(--cyan); }
+    .stat-val.green { color: var(--green); }
+    .stat-label {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 1.2px;
+      color: var(--text-dim);
+      margin-top: 0.2rem;
+    }
+    .arch-table { width: 100%; border-collapse: collapse; margin: 0.6rem 0; font-size: 12.5px; }
+    .arch-table th {
+      background: var(--bg-secondary);
+      color: var(--cyan);
+      font-family: 'Orbitron', sans-serif;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      text-align: left;
+      padding: 6px 10px;
+      border: 1px solid var(--border);
+    }
+    .arch-table td { padding: 6px 10px; border: 1px solid var(--border); color: var(--text-dim); vertical-align: top; }
+    .arch-table td code { color: var(--accent-light); background: var(--bg); padding: 1px 4px; }
+    .section-rule { border: 0; border-top: 1px dashed var(--border); margin: 2rem 0 1.5rem; }
   </style>
 </head>
 <body>
-  <div class="tutorial-wrap">
+  <div class="app tutorial-app" id="reportApp">
+    <div class="crt-scanline" id="crtH" aria-hidden="true"></div>
+    <div class="crt-scanline-v" id="crtV" aria-hidden="true"></div>
+
     <header class="tutorial-header">
       <div class="tutorial-header-inner">
-        <h1 class="tutorial-brand">// STRYKE-SCRAPE &mdash; ENGINEERING REPORT</h1>
-        <nav class="tutorial-nav">
-          <a href="index.html">Documentation</a>
-          <a href="https://github.com/MenkeTechnologies/stryke-scrape" target="_blank" rel="noopener noreferrer">GitHub</a>
-        </nav>
+        <div>
+          <h1 class="tutorial-brand">// STRYKE-SCRAPE &mdash; ENGINEERING REPORT</h1>
+          <nav class="tutorial-crumbs" aria-label="Breadcrumb">
+            <span class="current">Engineering Report</span>
+            <span class="sep">/</span>
+            <a href="index.html">Docs</a>
+            <span class="sep">/</span>
+            <a href="https://github.com/MenkeTechnologies/stryke-scrape" target="_blank" rel="noopener noreferrer">GitHub</a>
+            <span class="sep">/</span>
+            <a href="https://github.com/MenkeTechnologies/strykelang" target="_blank" rel="noopener noreferrer">strykelang</a>
+          </nav>
+          <p style="margin:0.35rem 0 0;font-family:'Share Tech Mono',monospace;font-size:11px;color:var(--text-dim);letter-spacing:0.03em;opacity:0.75;">
+            Opt-in stryke connector package &middot; cdylib <code>libstryke_scrape</code> &middot; namespace <code>Scrape</code> &middot; JSON-in/JSON-out FFI over dlopen
+          </p>
+        </div>
+        <div class="tutorial-toolbar">
+          <button type="button" class="btn btn-secondary" id="btnTheme" title="Toggle light/dark">Theme</button>
+          <button type="button" class="btn btn-secondary active" id="btnCrt" title="CRT scanline overlay">CRT</button>
+          <button type="button" class="btn btn-secondary active" id="btnNeon" title="Neon border pulse">Neon</button>
+        </div>
       </div>
     </header>
 
     <main class="tutorial-main">
-      <section>
-        <h2>The crawl engine</h2>
-        <p>
-          Crawling is <a href="https://github.com/spider-rs/spider" target="_blank" rel="noopener noreferrer">spider</a>,
-          vendored as a dependency. This package does not reimplement a crawler —
-          it configures a <code>spider::website::Website</code> from the request
-          dict (limit, depth, subdomains, robots, delay, concurrency, timeout,
-          blacklist, proxies, user-agent) and calls <code>scrape()</code>,
-          <code>crawl()</code>, or <code>crawl_sitemap()</code>. Results come back
-          as <code>{ url, status, html? }</code> per page.
-        </p>
-      </section>
 
-      <section>
-        <h2>One runtime, synchronous surface</h2>
-        <p>
-          spider's crawl methods are async and spawn tokio tasks internally, so
-          they must run inside a tokio runtime. The cdylib owns a single
-          multi-thread runtime, created lazily in a <code>OnceCell</code> and
-          reused for the life of the process. Every network export drives spider
-          with <code>block_on</code>, so the stryke side stays a plain
-          synchronous JSON call — no async leaks across the FFI boundary.
-        </p>
-      </section>
+      <h2 class="tutorial-title"><span class="step-hash">&gt;_</span>EXECUTIVE SUMMARY</h2>
+      <p class="tutorial-subtitle"><strong>stryke-scrape</strong> is an opt-in connector package in the stryke ecosystem &mdash; web scraping and crawling through a vendored crawl engine plus pure HTML extraction. It exposes fetch, crawl, sitemap discovery, and CSS / table / link / structured-data extraction as the <code>Scrape</code> package.</p>
+      <p class="tutorial-subtitle">The crawl engine is <a href="https://github.com/spider-rs/spider" target="_blank" rel="noopener noreferrer">spider</a>, vendored rather than reimplemented, driven through one embedded tokio runtime so the stryke side stays a plain synchronous JSON call. Extraction is html5ever-backed and runs with no network. The package ships once on demand rather than being linked into stryke core.</p>
 
-      <section>
-        <h2>The FFI bridge</h2>
-        <p>
-          Each <code>scrape__*</code> export is a JSON-string-in / JSON-string-out
-          <code>extern "C"</code> function. stryke's bridge resolves the symbols
-          listed in <code>stryke.toml</code>'s <code>[ffi]</code> table at first
-          <code>use Scrape</code>, passes a JSON args dict per call, and frees the
-          returned string via <code>stryke_free_cstring</code>. Handlers run under
-          <code>catch_unwind</code>, so a panic becomes an
-          <code>{ "error": … }</code> reply instead of unwinding across the
-          boundary.
-        </p>
-      </section>
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-val">Scrape</div><div class="stat-label">stryke namespace</div></div>
+        <div class="stat-card"><div class="stat-val cyan">opt-in</div><div class="stat-label">Tier</div></div>
+        <div class="stat-card"><div class="stat-val">cdylib</div><div class="stat-label">Load model (dlopen)</div></div>
+        <div class="stat-card"><div class="stat-val green">spider</div><div class="stat-label">Crawl engine (tokio)</div></div>
+      </div>
 
-      <section>
-        <h2>Pure extraction</h2>
-        <p>
-          The <code>extract</code> family runs html5ever-backed CSS selection
-          (the <code>scraper</code> crate) over an HTML string with no network.
-          Selector specs carry an optional trailing <code>@attr</code> to pull an
-          attribute instead of text; <code>extract_table</code> maps a
-          <code>&lt;table&gt;</code> to header-keyed records;
-          <code>extract_links</code> resolves relative hrefs against a base via
-          the <code>url</code> crate; <code>structured</code> parses JSON-LD
-          script blocks and OpenGraph / Twitter meta tags. These are pure
-          functions — unit-tested in the crate and exercised by the offline
-          surface test with nothing to connect to.
-        </p>
-      </section>
+      <hr class="section-rule">
+      <h2 class="tutorial-title"><span class="step-hash">~</span>THE CRAWL ENGINE</h2>
+      <p>Crawling is <a href="https://github.com/spider-rs/spider" target="_blank" rel="noopener noreferrer">spider</a>, vendored as a dependency. This package does not reimplement a crawler &mdash; it configures a <code>spider::website::Website</code> from the request dict (limit, depth, subdomains, robots, delay, concurrency, timeout, blacklist, proxies, user-agent) and calls <code>scrape()</code>, <code>crawl()</code>, or <code>crawl_sitemap()</code>. Results come back as <code>{ url, status, html? }</code> per page.</p>
 
-      <section>
-        <h2>Dependencies</h2>
-        <p>
-          <code>spider</code> (crawl engine, with <code>sitemap</code>),
-          <code>scraper</code> (html5ever CSS selection), <code>url</code>
-          (link resolution), <code>tokio</code> (the embedded runtime),
-          <code>serde</code> / <code>serde_json</code> for the FFI payloads,
-          <code>anyhow</code> + <code>once_cell</code> for error handling and the
-          runtime cell.
-        </p>
-      </section>
+      <hr class="section-rule">
+      <h2 class="tutorial-title"><span class="step-hash">~</span>ONE RUNTIME, SYNCHRONOUS SURFACE</h2>
+      <p>spider's crawl methods are async and spawn tokio tasks internally, so they must run inside a tokio runtime. The cdylib owns a single multi-thread runtime, created lazily in a <code>OnceCell</code> and reused for the life of the process. Every network export drives spider with <code>block_on</code>, so the stryke side stays a plain synchronous JSON call &mdash; no async leaks across the FFI boundary.</p>
+
+      <hr class="section-rule">
+      <h2 class="tutorial-title"><span class="step-hash">$</span>THE FFI BRIDGE</h2>
+      <p>Each <code>scrape__*</code> export is a JSON-string-in / JSON-string-out <code>extern "C"</code> function. stryke's bridge resolves the symbols listed in <code>stryke.toml</code>'s <code>[ffi]</code> table at first <code>use Scrape</code>, passes a JSON args dict per call, and frees the returned string via <code>stryke_free_cstring</code>. Handlers run under <code>catch_unwind</code>, so a panic becomes an <code>{ "error": &hellip; }</code> reply instead of unwinding across the boundary.</p>
+
+      <hr class="section-rule">
+      <h2 class="tutorial-title"><span class="step-hash">&amp;</span>PURE EXTRACTION</h2>
+      <p>The <code>extract</code> family runs html5ever-backed CSS selection (the <code>scraper</code> crate) over an HTML string with no network. These are pure functions &mdash; unit-tested in the crate and exercised by the offline surface test with nothing to connect to.</p>
+      <table class="arch-table">
+        <thead><tr><th>Engine</th><th>Behavior</th></tr></thead>
+        <tbody>
+          <tr><td>extract</td><td>CSS selection; selector specs carry an optional trailing <code>@attr</code> to pull an attribute instead of text</td></tr>
+          <tr><td>extract_table</td><td>maps a <code>&lt;table&gt;</code> to header-keyed records</td></tr>
+          <tr><td>extract_links</td><td>resolves relative hrefs against a base via the <code>url</code> crate</td></tr>
+          <tr><td>structured</td><td>parses JSON-LD script blocks and OpenGraph / Twitter meta tags</td></tr>
+        </tbody>
+      </table>
+
+      <hr class="section-rule">
+      <h2 class="tutorial-title"><span class="step-hash">/</span>DEPENDENCIES</h2>
+      <p><code>spider</code> (crawl engine, with <code>sitemap</code>), <code>scraper</code> (html5ever CSS selection), <code>url</code> (link resolution), <code>tokio</code> (the embedded runtime), <code>serde</code> / <code>serde_json</code> for the FFI payloads, <code>anyhow</code> + <code>once_cell</code> for error handling and the runtime cell.</p>
+
+      <hr class="section-rule">
+      <h2 class="tutorial-title"><span class="step-hash">#</span>PROJECT METADATA</h2>
+      <table class="arch-table">
+        <thead><tr><th>Item</th><th>Value</th></tr></thead>
+        <tbody>
+          <tr><td>License</td><td>MIT</td></tr>
+          <tr><td>Repository</td><td><a href="https://github.com/MenkeTechnologies/stryke-scrape" target="_blank" rel="noopener noreferrer">github.com/MenkeTechnologies/stryke-scrape</a></td></tr>
+          <tr><td>Parent language</td><td><a href="https://github.com/MenkeTechnologies/strykelang" target="_blank" rel="noopener noreferrer">strykelang</a></td></tr>
+          <tr><td>Meta umbrella</td><td><a href="https://github.com/MenkeTechnologies/MenkeTechnologiesMeta" target="_blank" rel="noopener noreferrer">MenkeTechnologiesMeta</a></td></tr>
+          <tr><td>Issues</td><td><a href="https://github.com/MenkeTechnologies/stryke-scrape/issues" target="_blank" rel="noopener noreferrer">github.com/MenkeTechnologies/stryke-scrape/issues</a></td></tr>
+        </tbody>
+      </table>
+
     </main>
-
-    <footer class="tutorial-footer">
-      <p>MIT &middot; MenkeTechnologies</p>
-    </footer>
   </div>
   <script src="hud-theme.js"></script>
 </body>

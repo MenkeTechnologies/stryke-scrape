@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <meta name="description" content="stryke-scrape engineering report — the spider crawl engine behind one embedded tokio runtime, the JSON FFI bridge, and the pure html5ever extraction engines (CSS, tables, links, structured data).">
+  <title>stryke-scrape — Engineering report</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&amp;family=Share+Tech+Mono&amp;display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="hud-static.css">
+  <link rel="stylesheet" href="tutorial.css">
+  <style>
+    .tutorial-main { max-width: 68rem; }
+  </style>
+</head>
+<body>
+  <div class="tutorial-wrap">
+    <header class="tutorial-header">
+      <div class="tutorial-header-inner">
+        <h1 class="tutorial-brand">// STRYKE-SCRAPE &mdash; ENGINEERING REPORT</h1>
+        <nav class="tutorial-nav">
+          <a href="index.html">Documentation</a>
+          <a href="https://github.com/MenkeTechnologies/stryke-scrape" target="_blank" rel="noopener noreferrer">GitHub</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="tutorial-main">
+      <section>
+        <h2>The crawl engine</h2>
+        <p>
+          Crawling is <a href="https://github.com/spider-rs/spider" target="_blank" rel="noopener noreferrer">spider</a>,
+          vendored as a dependency. This package does not reimplement a crawler —
+          it configures a <code>spider::website::Website</code> from the request
+          dict (limit, depth, subdomains, robots, delay, concurrency, timeout,
+          blacklist, proxies, user-agent) and calls <code>scrape()</code>,
+          <code>crawl()</code>, or <code>crawl_sitemap()</code>. Results come back
+          as <code>{ url, status, html? }</code> per page.
+        </p>
+      </section>
+
+      <section>
+        <h2>One runtime, synchronous surface</h2>
+        <p>
+          spider's crawl methods are async and spawn tokio tasks internally, so
+          they must run inside a tokio runtime. The cdylib owns a single
+          multi-thread runtime, created lazily in a <code>OnceCell</code> and
+          reused for the life of the process. Every network export drives spider
+          with <code>block_on</code>, so the stryke side stays a plain
+          synchronous JSON call — no async leaks across the FFI boundary.
+        </p>
+      </section>
+
+      <section>
+        <h2>The FFI bridge</h2>
+        <p>
+          Each <code>scrape__*</code> export is a JSON-string-in / JSON-string-out
+          <code>extern "C"</code> function. stryke's bridge resolves the symbols
+          listed in <code>stryke.toml</code>'s <code>[ffi]</code> table at first
+          <code>use Scrape</code>, passes a JSON args dict per call, and frees the
+          returned string via <code>stryke_free_cstring</code>. Handlers run under
+          <code>catch_unwind</code>, so a panic becomes an
+          <code>{ "error": … }</code> reply instead of unwinding across the
+          boundary.
+        </p>
+      </section>
+
+      <section>
+        <h2>Pure extraction</h2>
+        <p>
+          The <code>extract</code> family runs html5ever-backed CSS selection
+          (the <code>scraper</code> crate) over an HTML string with no network.
+          Selector specs carry an optional trailing <code>@attr</code> to pull an
+          attribute instead of text; <code>extract_table</code> maps a
+          <code>&lt;table&gt;</code> to header-keyed records;
+          <code>extract_links</code> resolves relative hrefs against a base via
+          the <code>url</code> crate; <code>structured</code> parses JSON-LD
+          script blocks and OpenGraph / Twitter meta tags. These are pure
+          functions — unit-tested in the crate and exercised by the offline
+          surface test with nothing to connect to.
+        </p>
+      </section>
+
+      <section>
+        <h2>Dependencies</h2>
+        <p>
+          <code>spider</code> (crawl engine, with <code>sitemap</code>),
+          <code>scraper</code> (html5ever CSS selection), <code>url</code>
+          (link resolution), <code>tokio</code> (the embedded runtime),
+          <code>serde</code> / <code>serde_json</code> for the FFI payloads,
+          <code>anyhow</code> + <code>once_cell</code> for error handling and the
+          runtime cell.
+        </p>
+      </section>
+    </main>
+
+    <footer class="tutorial-footer">
+      <p>MIT &middot; MenkeTechnologies</p>
+    </footer>
+  </div>
+  <script src="hud-theme.js"></script>
+</body>
+</html>

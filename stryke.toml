@@ -1,0 +1,31 @@
+[package]
+name = "stryke-scrape"
+version = "0.1.0"
+description = "Web scraping / crawling client for stryke. cdylib loaded in-process — fetch a page, crawl a site (robots-respecting, depth/limit/subdomain bounded), sitemap discovery, plus pure CSS / table / link / structured-data (JSON-LD, OpenGraph) extraction. Wraps the spider engine."
+authors = ["MenkeTechnologies"]
+license = "MIT"
+repository = "https://github.com/MenkeTechnologies/stryke-scrape"
+edition = "2026"
+
+[ffi]
+lib-name = "stryke_scrape"
+namespace = "Scrape"
+exports = [
+    "scrape__version",
+    "scrape__fetch",
+    "scrape__crawl",
+    "scrape__links",
+    "scrape__sitemap",
+    "scrape__extract",
+    "scrape__extract_table",
+    "scrape__extract_links",
+    "scrape__extract_attrs",
+    "scrape__structured",
+]
+
+[scripts]
+build = "cargo build --release"
+build-debug = "cargo build"
+clean = "cargo clean"
+test = "s test t/"
+install = "s pkg install -g ."

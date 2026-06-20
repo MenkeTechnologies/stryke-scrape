@@ -1,0 +1,42 @@
+## examples/extract.stk — pure (no-network) extraction from an HTML string.
+##
+##   s run examples/extract.stk
+
+use Scrape
+
+val $html = '<html><head>' +
+    '<meta property="og:title" content="Acme Widget">' +
+    '<meta property="og:price" content="19.99">' +
+    '</head><body>' +
+    '<h1 class="title">Acme Widget</h1>' +
+    '<span class="price">$19.99</span>' +
+    '<table><tr><th>Feature</th><th>Value</th></tr>' +
+    '<tr><td>Weight</td><td>1.2kg</td></tr>' +
+    '<tr><td>Colour</td><td>red</td></tr></table>' +
+    '<a href="/spec">Spec</a><a href="/buy">Buy</a>' +
+    '</body></html>'
+
+# field extraction: text + a price, first match each
+val $rec = Scrape::extract($html, {
+    title => "h1.title",
+    price => "span.price",
+})
+say "title: $rec->{title}"
+say "price: $rec->{price}"
+
+# table → records
+val $rows = Scrape::extract_table($html)
+for val $r (@$rows) {
+    say "  $r->{Feature} = $r->{Value}"
+}
+
+# links resolved against a base
+val $links = Scrape::extract_links($html, base => "https://acme.test/products/widget")
+for val $l (@$links) {
+    say "  link: $l->{text} -> $l->{href}"
+}
+
+# structured metadata
+val $meta = Scrape::structured($html)
+say "og:title = $meta->{opengraph}{title}"
+say "og:price = $meta->{opengraph}{price}"

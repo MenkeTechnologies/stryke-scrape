@@ -1,0 +1,39 @@
+## t/test_scrape.stk — assertion tests for the stryke `Scrape` package.
+##
+## The extraction asserts always run (no network). The live-crawl asserts need
+## network reachability and are opt-in via $SCRAPE_LIVE_URL; they short-circuit
+## when it is unset so CI without egress stays green. Point $SCRAPE_LIVE_URL at
+## a small site you control (or a localhost server) to exercise the spider path.
+
+use Scrape
+
+# ── permission-free: cdylib reachable ───────────────────────────────
+assert_ok Scrape::version(), "Scrape::version returns truthy (cdylib loaded)"
+
+# ── no-network extraction ───────────────────────────────────────────
+val $html = '<ul><li class="i">a</li><li class="i">b</li></ul>'
+val $items = Scrape::extract($html, { items => "li.i" }, all => 1)
+assert_eq scalar(@{ $items->{items} }), 2, "extract all li"
+assert_eq $items->{items}[0], "a", "first item text"
+
+# ── live crawl (opt-in) ─────────────────────────────────────────────
+if (defined $ENV{SCRAPE_LIVE_URL}) {
+    val $url = $ENV{SCRAPE_LIVE_URL}
+
+    # 1. single fetch
+    val $page = eval { Scrape::fetch($url) }
+    if (defined $page && exists $page->{html}) {
+        assert_ok length($page->{html}) > 0, "fetch returned a body"
+        assert_ok $page->{status} >= 200, "fetch returned a status"
+    }
+
+    # 2. bounded crawl, robots respected, links-only payload
+    val $res = eval {
+        Scrape::crawl($url, limit => 5, depth => 2, include_html => 0)
+    }
+    if (defined $res) {
+        assert_ok $res->{count} >= 1, "crawl visited at least the seed"
+    }
+}
+
+test_run

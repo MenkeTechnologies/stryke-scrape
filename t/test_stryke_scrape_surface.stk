@@ -1,0 +1,65 @@
+## t/test_stryke_scrape_surface.stk — wrapper-completeness + pure-engine pin.
+##
+## Asserts every public `fn Scrape::name` resolves via `use`, then exercises the
+## no-network extraction engines (extract, table, links, attrs, structured).
+## Permission-free and offline — CI validates the surface and the extraction
+## logic with nothing to connect to.
+
+use Scrape
+
+# ── wrapper surface ────────────────────────────────────────
+assert_ok exists &Scrape::version, "Scrape::version exists"
+assert_ok exists &Scrape::fetch, "Scrape::fetch exists"
+assert_ok exists &Scrape::crawl, "Scrape::crawl exists"
+assert_ok exists &Scrape::links, "Scrape::links exists"
+assert_ok exists &Scrape::sitemap, "Scrape::sitemap exists"
+assert_ok exists &Scrape::extract, "Scrape::extract exists"
+assert_ok exists &Scrape::extract_table, "Scrape::extract_table exists"
+assert_ok exists &Scrape::extract_links, "Scrape::extract_links exists"
+assert_ok exists &Scrape::extract_attrs, "Scrape::extract_attrs exists"
+assert_ok exists &Scrape::structured, "Scrape::structured exists"
+
+# ── version (cdylib loaded) ────────────────────────────────
+assert_ok Scrape::version(), "Scrape::version returns truthy (cdylib loaded)"
+
+val $html = '<html><head>' +
+    '<meta property="og:title" content="Widget">' +
+    '<script type="application/ld+json">{"@type":"Product","name":"Widget"}</script>' +
+    '</head><body>' +
+    '<h1>Hello World</h1>' +
+    '<a class="nav" href="/about">About</a>' +
+    '<a class="nav" href="https://ex.com/x">X</a>' +
+    '<table id="t"><tr><th>Name</th><th>Qty</th></tr>' +
+    '<tr><td>apple</td><td>3</td></tr><tr><td>pear</td><td>5</td></tr></table>' +
+    '</body></html>'
+
+# ── extract: text + attribute, first match ─────────────────
+val $rec = Scrape::extract($html, { title => "h1", first => "a.nav \@href" })
+assert_eq $rec->{title}, "Hello World", "extract h1 text"
+assert_eq $rec->{first}, "/about", "extract first href attribute"
+
+# ── extract: all matches ───────────────────────────────────
+val $all = Scrape::extract($html, { links => "a.nav \@href" }, all => 1)
+assert_eq scalar(@{ $all->{links} }), 2, "extract all collects both links"
+
+# ── table → header-keyed records ───────────────────────────
+val $rows = Scrape::extract_table($html, selector => "#t")
+assert_eq scalar(@$rows), 2, "table has two data rows"
+assert_eq $rows->[0]{Name}, "apple", "table row 0 Name"
+assert_eq $rows->[1]{Qty}, "5", "table row 1 Qty"
+
+# ── links resolved against a base ──────────────────────────
+val $links = Scrape::extract_links($html, base => "https://site.test/dir/")
+assert_eq $links->[0]{href}, "https://site.test/about", "relative link resolved"
+assert_eq $links->[1]{href}, "https://ex.com/x", "absolute link preserved"
+
+# ── attrs ──────────────────────────────────────────────────
+val $hrefs = Scrape::extract_attrs($html, "a.nav", "href")
+assert_eq scalar(@$hrefs), 2, "two hrefs collected"
+
+# ── structured metadata ────────────────────────────────────
+val $s = Scrape::structured($html)
+assert_eq $s->{opengraph}{title}, "Widget", "opengraph title"
+assert_eq $s->{jsonld}[0]{name}, "Widget", "json-ld product name"
+
+test_run

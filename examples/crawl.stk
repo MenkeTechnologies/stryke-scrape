@@ -1,0 +1,26 @@
+## examples/crawl.stk — crawl a site, then extract from each fetched page.
+##
+##   s run examples/crawl.stk https://example.com
+##
+## Crawling respects robots.txt by default and sends an identifying
+## stryke-scrape User-Agent. Keep `limit`/`depth` small when pointing at a
+## site you do not control, and add a `delay` to be courteous.
+
+use Scrape
+
+val $url = $ARGV[0] // "https://example.com"
+
+# bounded, robots-respecting crawl with a per-request delay
+val $res = Scrape::crawl($url,
+    limit       => 10,
+    depth       => 2,
+    delay       => 200,       # ms between requests
+    concurrency => 4,
+)
+say "crawled $res->{count} pages"
+
+# pull the <title> out of each fetched page
+for val $p (@{ $res->{pages} }) {
+    val $rec = Scrape::extract($p->{html}, { title => "title" })
+    say "  [$p->{status}] $p->{url} — $rec->{title}"
+}

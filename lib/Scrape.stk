@@ -1,0 +1,110 @@
+## lib/Scrape.stk — web scraping / crawling client for stryke (`use Scrape`).
+##
+## Thin wrapper around the `stryke-scrape` cdylib's `scrape__*` exports. The
+## cdylib is dlopened in-process on first `use Scrape` and registers each export
+## via `rust_ffi::load_cdylib`. Every wrapper builds a JSON args dict, calls the
+## FFI symbol, and parses the JSON return.
+##
+## Two halves: network crawling (fetch/crawl/links/sitemap) wraps the `spider`
+## engine; pure extraction (extract/extract_table/extract_links/extract_attrs/
+## structured) runs CSS selection over an HTML string with no network.
+##
+## Crawling defaults to courteous behaviour: robots.txt respected, an
+## identifying stryke-scrape User-Agent, and optional per-request delay +
+## concurrency caps. Respecting a site's terms of use is the caller's
+## responsibility; this package provides the mechanisms.
+
+package Scrape
+
+# ── error dispatch ────────────────────────────────────────────────────
+
+## Decode the JSON from a `scrape__*` FFI call; die on a reported error.
+fn Scrape::_decode ($name, $json) {
+    val $o = from_json $json
+    if (ref $o eq "HASH" && exists $o->{error}) {
+        die "Scrape::$name: $o->{error}"
+    }
+    $o
+}
+
+## Pull the crawl/config knobs out of %opts into a request hash keyed on $url.
+fn Scrape::_req ($url, $opts) {
+    var %r = (url => $url)
+    for val $k (qw(limit depth subdomains respect_robots delay concurrency
+                   timeout_ms blacklist proxies user_agent include_html)) {
+        $r{$k} = $opts->{$k} if exists $opts->{$k} && defined $opts->{$k}
+    }
+    \%r
+}
+
+# ── version ───────────────────────────────────────────────────────────
+
+## Package version string.
+fn Scrape::version {
+    Scrape::_decode("version", scrape__version("{}"))->{version}
+}
+
+# ── network: fetch + crawl ────────────────────────────────────────────
+
+## Fetch a single URL. Returns `{ url, status, html }`. Links are not followed.
+fn Scrape::fetch ($url, %opts) {
+    val $r = Scrape::_req($url, \%opts)
+    Scrape::_decode("fetch", scrape__fetch(to_json($r)))
+}
+
+## Crawl a site from $url. %opts: limit, depth, subdomains, respect_robots,
+## delay (ms/request), concurrency, timeout_ms, blacklist => [urls],
+## proxies => [urls], user_agent, include_html (default true).
+## Returns `{ count, pages => [ { url, status, html? } ] }`.
+fn Scrape::crawl ($url, %opts) {
+    val $r = Scrape::_req($url, \%opts)
+    Scrape::_decode("crawl", scrape__crawl(to_json($r)))
+}
+
+## Crawl link structure only (no bodies). Returns `{ count, links => [...] }`.
+fn Scrape::links ($url, %opts) {
+    val $r = Scrape::_req($url, \%opts)
+    Scrape::_decode("links", scrape__links(to_json($r)))
+}
+
+## Discover + crawl pages via the site's sitemap.xml. Same shape as `crawl`.
+fn Scrape::sitemap ($url, %opts) {
+    val $r = Scrape::_req($url, \%opts)
+    Scrape::_decode("sitemap", scrape__sitemap(to_json($r)))
+}
+
+# ── pure extraction (no network) ──────────────────────────────────────
+
+## Extract a record from $html per $fields (`{ name => "css selector" }`). A
+## selector ending in ` @attr` extracts that attribute, else text. With
+## %opts{all} true each field is an array of every match. Returns the record.
+fn Scrape::extract ($html, $fields, %opts) {
+    val $r = { html => $html, fields => $fields, all => ($opts{all} // 0) }
+    Scrape::_decode("extract", scrape__extract(to_json($r)))->{value}
+}
+
+## Extract the first `<table>` (or %opts{selector}) into an array of
+## header-keyed row dicts.
+fn Scrape::extract_table ($html, %opts) {
+    val $r = { html => $html, selector => $opts{selector} }
+    Scrape::_decode("extract_table", scrape__extract_table(to_json($r)))->{rows}
+}
+
+## Extract every `<a href>` as `{ text, href }`. With %opts{base}, hrefs are
+## resolved to absolute URLs.
+fn Scrape::extract_links ($html, %opts) {
+    val $r = { html => $html, base => $opts{base} }
+    Scrape::_decode("extract_links", scrape__extract_links(to_json($r)))->{links}
+}
+
+## Collect the $attr value of every element matching $selector.
+fn Scrape::extract_attrs ($html, $selector, $attr) {
+    val $r = { html => $html, selector => $selector, attr => $attr }
+    Scrape::_decode("extract_attrs", scrape__extract_attrs(to_json($r)))->{value}
+}
+
+## Extract structured metadata: `{ jsonld => [...], opengraph => {...},
+## twitter => {...} }`.
+fn Scrape::structured ($html) {
+    Scrape::_decode("structured", scrape__structured(to_json({ html => $html })))
+}

@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <meta name="description" content="stryke-scrape — web scraping / crawling client for stryke. Fetch, crawl (robots-respecting), sitemap discovery, plus pure CSS / table / link / structured-data (JSON-LD, OpenGraph) extraction. Wraps the spider engine. Opt-in Rust cdylib.">
+  <title>stryke-scrape — Documentation</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&amp;family=Share+Tech+Mono&amp;display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="hud-static.css">
+  <link rel="stylesheet" href="tutorial.css">
+  <style>
+    .tutorial-main { max-width: 68rem; }
+    .example-tbl { width: 100%; border-collapse: collapse; margin: 0.6rem 0; font-size: 12.5px; }
+    .example-tbl td { padding: 6px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    .example-tbl td:first-child { white-space: nowrap; color: var(--accent); font-family: 'Share Tech Mono', ui-monospace, monospace; }
+  </style>
+</head>
+<body>
+  <div class="tutorial-wrap">
+    <header class="tutorial-header">
+      <div class="tutorial-header-inner">
+        <h1 class="tutorial-brand">// STRYKE-SCRAPE &mdash; WEB SCRAPING + CRAWLING CLIENT FOR STRYKE</h1>
+        <nav class="tutorial-nav">
+          <a href="report.html">Engineering report</a>
+          <a href="https://github.com/MenkeTechnologies/stryke-scrape" target="_blank" rel="noopener noreferrer">GitHub</a>
+          <a href="https://github.com/MenkeTechnologies/strykelang" target="_blank" rel="noopener noreferrer">strykelang</a>
+          <a href="https://github.com/MenkeTechnologies/MenkeTechnologiesMeta" target="_blank" rel="noopener noreferrer">Meta</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="tutorial-main">
+      <section>
+        <h2>What it is</h2>
+        <p>
+          <code>stryke-scrape</code> is web scraping and crawling for
+          <a href="https://github.com/MenkeTechnologies/strykelang" target="_blank" rel="noopener noreferrer">stryke</a>:
+          fetch a page, crawl a site (robots-respecting, depth/limit/subdomain
+          bounded), discover via sitemap, then extract with CSS selectors,
+          tables-to-records, link harvesting, and structured data (JSON-LD,
+          OpenGraph, Twitter cards). The crawl engine is
+          <a href="https://github.com/spider-rs/spider" target="_blank" rel="noopener noreferrer">spider</a> —
+          vendored, not reimplemented — driven through one embedded tokio
+          runtime owned by the cdylib. Extraction is html5ever-backed and runs
+          with no network.
+        </p>
+      </section>
+
+      <section>
+        <h2>Fetch and extract</h2>
+        <pre><code>use Scrape
+
+val $page = Scrape::fetch "https://example.com"
+
+# selector ending in ` @attr` pulls that attribute, else element text
+val $rec = Scrape::extract $page-&gt;{html}, {
+    title =&gt; "h1",
+    links =&gt; "a @href",
+}, all =&gt; 1</code></pre>
+      </section>
+
+      <section>
+        <h2>Crawl a site</h2>
+        <pre><code>val $res = Scrape::crawl "https://example.com",
+    limit       =&gt; 50,
+    depth       =&gt; 3,
+    delay       =&gt; 200,   # ms between requests
+    concurrency =&gt; 4
+
+p $res-&gt;{count}          # pages fetched, robots respected</code></pre>
+        <p>Set <code>include_html =&gt; 0</code> to map URLs only, or use <code>Scrape::links</code> for the link graph and <code>Scrape::sitemap</code> for sitemap-driven discovery.</p>
+      </section>
+
+      <section>
+        <h2>Pure extraction</h2>
+        <p>Works on any HTML string you already have — no network:</p>
+        <table class="example-tbl">
+          <tr><td>extract</td><td>CSS selectors → record; <code>@attr</code> suffix for attributes; <code>all</code> for every match.</td></tr>
+          <tr><td>extract_table</td><td><code>&lt;table&gt;</code> → array of header-keyed row dicts.</td></tr>
+          <tr><td>extract_links</td><td>every <code>&lt;a href&gt;</code> as <code>{ text, href }</code>, resolved against a <code>base</code>.</td></tr>
+          <tr><td>extract_attrs</td><td>collect one attribute across every match of a selector.</td></tr>
+          <tr><td>structured</td><td>JSON-LD blocks + OpenGraph + Twitter card metadata.</td></tr>
+        </table>
+      </section>
+
+      <section>
+        <h2>Politeness</h2>
+        <p>
+          <code>crawl</code>, <code>links</code>, and <code>sitemap</code>
+          default <code>respect_robots</code> to true and send an identifying
+          <code>stryke-scrape/&lt;version&gt;</code> User-Agent. <code>delay</code>
+          and <code>concurrency</code> throttle a crawl. Respecting a site's
+          terms of use, rate limits, and robots directives is the caller's
+          responsibility — the package sets the courteous defaults.
+        </p>
+      </section>
+
+      <section>
+        <h2>API surface</h2>
+        <table class="example-tbl">
+          <tr><td>Network</td><td>fetch, crawl, links, sitemap</td></tr>
+          <tr><td>Extract</td><td>extract, extract_table, extract_links, extract_attrs, structured</td></tr>
+        </table>
+        <p>The full API lives in the <a href="https://github.com/MenkeTechnologies/stryke-scrape#readme">README</a>.</p>
+      </section>
+
+      <section>
+        <h2>Package family</h2>
+        <p>Part of the stryke connector family under the <a href="https://github.com/MenkeTechnologies/MenkeTechnologiesMeta" target="_blank" rel="noopener noreferrer">MenkeTechnologiesMeta</a> umbrella:</p>
+        <ul>
+          <li><a href="https://github.com/MenkeTechnologies/stryke-search" target="_blank" rel="noopener noreferrer">stryke-search</a> — Elasticsearch / OpenSearch</li>
+          <li><a href="https://github.com/MenkeTechnologies/stryke-selenium" target="_blank" rel="noopener noreferrer">stryke-selenium</a> — browser automation</li>
+          <li><a href="https://github.com/MenkeTechnologies/stryke-redis" target="_blank" rel="noopener noreferrer">stryke-redis</a> — Redis / Valkey</li>
+          <li><a href="https://github.com/MenkeTechnologies/stryke-postgres" target="_blank" rel="noopener noreferrer">stryke-postgres</a> — PostgreSQL</li>
+        </ul>
+      </section>
+    </main>
+
+    <footer class="tutorial-footer">
+      <p>MIT &middot; MenkeTechnologies</p>
+    </footer>
+  </div>
+  <script src="hud-theme.js"></script>
+</body>
+</html>

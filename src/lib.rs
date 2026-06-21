@@ -498,6 +498,112 @@ fn select_html(html: &str, selector: &str, inner: bool) -> Result<Value> {
     Ok(Value::Array(out))
 }
 
+// ── URL / query-string helpers (pure; no network) ────────────────────────────
+
+fn hex_val(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
+    }
+}
+
+/// Percent-encode a string for a URL component: RFC 3986 unreserved
+/// (`A-Za-z0-9-_.~`) pass through, everything else becomes `%XX`.
+fn url_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
+/// Decode `%XX` escapes. With `plus_as_space` (query-component decoding), `+`
+/// also maps to a space. Invalid escapes are left verbatim.
+fn url_decode(s: &str, plus_as_space: bool) -> String {
+    let bytes = s.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'%' if i + 2 < bytes.len() => match (hex_val(bytes[i + 1]), hex_val(bytes[i + 2])) {
+                (Some(h), Some(l)) => {
+                    out.push(h * 16 + l);
+                    i += 3;
+                }
+                _ => {
+                    out.push(bytes[i]);
+                    i += 1;
+                }
+            },
+            b'+' if plus_as_space => {
+                out.push(b' ');
+                i += 1;
+            }
+            c => {
+                out.push(c);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Parse a query string (leading `?` optional) into a `{ key: value }` map.
+/// Keys/values are form-decoded (`+` → space, `%XX`). Duplicate keys: last wins.
+fn parse_query(qs: &str) -> Value {
+    let qs = qs.strip_prefix('?').unwrap_or(qs);
+    let mut map = Map::new();
+    for pair in qs.split('&') {
+        if pair.is_empty() {
+            continue;
+        }
+        let (k, v) = match pair.split_once('=') {
+            Some((k, v)) => (url_decode(k, true), url_decode(v, true)),
+            None => (url_decode(pair, true), String::new()),
+        };
+        map.insert(k, Value::String(v));
+    }
+    Value::Object(map)
+}
+
+/// Build a query string from a `{ key: value }` map (percent-encoded, `&`-joined).
+fn build_query(obj: &Map<String, Value>) -> String {
+    obj.iter()
+        .map(|(k, v)| {
+            let val = match v {
+                Value::String(s) => s.clone(),
+                Value::Null => String::new(),
+                other => other.to_string(),
+            };
+            format!("{}={}", url_encode(k), url_encode(&val))
+        })
+        .collect::<Vec<_>>()
+        .join("&")
+}
+
+/// Decompose a URL into `{ scheme, host, port, path, query, fragment, username,
+/// password }` (port falls back to the scheme's default).
+fn url_parse(s: &str) -> Result<Value> {
+    let u = Url::parse(s).map_err(|e| anyhow!("bad url {s:?}: {e}"))?;
+    Ok(json!({
+        "scheme": u.scheme(),
+        "host": u.host_str(),
+        "port": u.port_or_known_default(),
+        "path": u.path(),
+        "query": u.query(),
+        "fragment": u.fragment(),
+        "username": (!u.username().is_empty()).then(|| u.username().to_string()),
+        "password": u.password(),
+    }))
+}
+
 // ── exports: version ─────────────────────────────────────────────────────────
 
 #[no_mangle]
@@ -733,6 +839,65 @@ pub extern "C" fn scrape__select(args: *const c_char) -> *const c_char {
     })
 }
 
+#[no_mangle]
+pub extern "C" fn scrape__url_encode(args: *const c_char) -> *const c_char {
+    ffi_call(args, |v| {
+        let s = v
+            .get("value")
+            .and_then(|x| x.as_str())
+            .ok_or_else(|| anyhow!("missing value"))?;
+        Ok(json!({ "value": url_encode(s) }))
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn scrape__url_decode(args: *const c_char) -> *const c_char {
+    ffi_call(args, |v| {
+        let s = v
+            .get("value")
+            .and_then(|x| x.as_str())
+            .ok_or_else(|| anyhow!("missing value"))?;
+        let plus = v
+            .get("plus_as_space")
+            .and_then(|x| x.as_bool())
+            .unwrap_or(false);
+        Ok(json!({ "value": url_decode(s, plus) }))
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn scrape__parse_query(args: *const c_char) -> *const c_char {
+    ffi_call(args, |v| {
+        let qs = v
+            .get("query")
+            .and_then(|x| x.as_str())
+            .ok_or_else(|| anyhow!("missing query"))?;
+        Ok(json!({ "params": parse_query(qs) }))
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn scrape__build_query(args: *const c_char) -> *const c_char {
+    ffi_call(args, |v| {
+        let params = v
+            .get("params")
+            .and_then(|x| x.as_object())
+            .ok_or_else(|| anyhow!("missing params object"))?;
+        Ok(json!({ "value": build_query(params) }))
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn scrape__url_parse(args: *const c_char) -> *const c_char {
+    ffi_call(args, |v| {
+        let url = v
+            .get("url")
+            .and_then(|x| x.as_str())
+            .ok_or_else(|| anyhow!("missing url"))?;
+        Ok(json!({ "parts": url_parse(url)? }))
+    })
+}
+
 // ── unit tests (pure engines; no network — run in CI) ────────────────────────
 
 #[cfg(test)]
@@ -907,5 +1072,51 @@ mod tests {
         assert_eq!(outer[0], json!(r#"<span class="a">hi</span>"#));
         let inner = select_html(html, "span.a", true).unwrap();
         assert_eq!(inner, json!(["hi", "yo"]));
+    }
+
+    #[test]
+    fn url_encode_decode_round_trips() {
+        assert_eq!(url_encode("a b&c=d"), "a%20b%26c%3Dd");
+        assert_eq!(url_encode("safe-_.~"), "safe-_.~");
+        assert_eq!(url_decode("a%20b%26c", false), "a b&c");
+        assert_eq!(url_decode("a+b", true), "a b");
+        assert_eq!(url_decode("a+b", false), "a+b");
+        // round trip for arbitrary content
+        let s = "héllo world/?#&=+";
+        assert_eq!(url_decode(&url_encode(s), false), s);
+    }
+
+    #[test]
+    fn parse_query_decodes_pairs() {
+        let v = parse_query("?a=1&b=hello+world&c=%2F&flag");
+        assert_eq!(v["a"], json!("1"));
+        assert_eq!(v["b"], json!("hello world"));
+        assert_eq!(v["c"], json!("/"));
+        assert_eq!(v["flag"], json!(""));
+    }
+
+    #[test]
+    fn build_query_encodes_and_pairs() {
+        // single key avoids depending on serde_json map ordering
+        let mut m = Map::new();
+        m.insert("q".into(), json!("a b&c"));
+        assert_eq!(build_query(&m), "q=a%20b%26c");
+        // round-trips through parse_query
+        let mut m2 = Map::new();
+        m2.insert("k".into(), json!("v/1"));
+        assert_eq!(parse_query(&build_query(&m2))["k"], json!("v/1"));
+    }
+
+    #[test]
+    fn url_parse_decomposes() {
+        let v = url_parse("https://user:pw@ex.com:8443/p/q?x=1#frag").unwrap();
+        assert_eq!(v["scheme"], json!("https"));
+        assert_eq!(v["host"], json!("ex.com"));
+        assert_eq!(v["port"], json!(8443));
+        assert_eq!(v["path"], json!("/p/q"));
+        assert_eq!(v["query"], json!("x=1"));
+        assert_eq!(v["fragment"], json!("frag"));
+        assert_eq!(v["username"], json!("user"));
+        assert_eq!(v["password"], json!("pw"));
     }
 }

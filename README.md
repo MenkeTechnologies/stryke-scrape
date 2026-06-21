@@ -160,6 +160,13 @@ Scrape::structured      $html → { jsonld => [...], opengraph => {...}, twitter
 Scrape::select          $html, $selector, %opts → [ html, ... ]   # opts: inner
 Scrape::absolutize      $base, $href → $url
 
+# URL / query-string helpers (pure)
+Scrape::url_encode      $value → $encoded                    # RFC 3986 percent-encode
+Scrape::url_decode      $value, %opts → $decoded             # opts: plus_as_space
+Scrape::parse_query     $query → { key => value, ... }
+Scrape::build_query     \%params → $query_string
+Scrape::url_parse       $url → { scheme, host, port, path, query, fragment, username, password }
+
 Scrape::version → $semver
 ```
 

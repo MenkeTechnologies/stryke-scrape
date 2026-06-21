@@ -146,3 +146,32 @@ fn Scrape::select ($html, $selector, %opts) {
     val $r = { html => $html, selector => $selector, inner => ($opts{inner} // 0) }
     Scrape::_decode("select", scrape__select(to_json($r)))->{html}
 }
+
+# ── URL / query-string helpers (pure) ─────────────────────────────────
+
+## Percent-encode $value for a URL component (RFC 3986; space → %20).
+fn Scrape::url_encode ($value) {
+    Scrape::_decode("url_encode", scrape__url_encode(to_json({ value => $value })))->{value}
+}
+
+## Decode `%XX` escapes in $value. With %opts{plus_as_space}, `+` → space.
+fn Scrape::url_decode ($value, %opts) {
+    val $r = { value => $value, plus_as_space => ($opts{plus_as_space} // 0) }
+    Scrape::_decode("url_decode", scrape__url_decode(to_json($r)))->{value}
+}
+
+## Parse a query string (leading `?` optional) into a `{ key => value }` hashref.
+fn Scrape::parse_query ($query) {
+    Scrape::_decode("parse_query", scrape__parse_query(to_json({ query => $query })))->{params}
+}
+
+## Build a query string from a $params hashref (percent-encoded, `&`-joined).
+fn Scrape::build_query ($params) {
+    Scrape::_decode("build_query", scrape__build_query(to_json({ params => $params })))->{value}
+}
+
+## Decompose $url into `{ scheme, host, port, path, query, fragment, username,
+## password }`.
+fn Scrape::url_parse ($url) {
+    Scrape::_decode("url_parse", scrape__url_parse(to_json({ url => $url })))->{parts}
+}

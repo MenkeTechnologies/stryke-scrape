@@ -1,6 +1,6 @@
 [package]
 name = "stryke-scrape"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "Web scraping / crawling cdylib for stryke — fetch, crawl, sitemap, plus pure CSS / table / link / structured-data extraction. Wraps spider"
 authors = ["MenkeTechnologies"]

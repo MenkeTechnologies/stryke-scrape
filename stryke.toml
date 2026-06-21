@@ -1,6 +1,6 @@
 [package]
 name = "stryke-scrape"
-version = "0.2.0"
+version = "0.3.0"
 description = "Web scraping / crawling client for stryke. cdylib loaded in-process — fetch a page, crawl a site (robots-respecting, depth/limit/subdomain bounded), sitemap discovery, plus pure CSS / table / link / structured-data (JSON-LD, OpenGraph) extraction. Wraps the spider engine."
 authors = ["MenkeTechnologies"]
 license = "MIT"
@@ -27,6 +27,11 @@ exports = [
     "scrape__extract_feeds",
     "scrape__absolutize",
     "scrape__select",
+    "scrape__url_encode",
+    "scrape__url_decode",
+    "scrape__parse_query",
+    "scrape__build_query",
+    "scrape__url_parse",
 ]
 
 [scripts]

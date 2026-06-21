@@ -91,7 +91,7 @@ use Scrape
 
 # 1. Fetch one page.
 val $page = Scrape::fetch "https://example.com"
-say "$page->{status} — " + length($page->{html}) + " bytes"
+p "$page->{status} — #{len $page->{html}} bytes"
 
 # 2. Extract fields. A selector ending in ` @attr` pulls that attribute,
 #    otherwise the element text. `all => 1` returns every match.
@@ -106,12 +106,12 @@ for val $r (@$rows) { p $r }
 
 # 4. Structured metadata.
 val $meta = Scrape::structured $page->{html}
-say $meta->{opengraph}{title}
+p $meta->{opengraph}{title}
 
 # 5. Crawl a site — robots respected, bounded, throttled.
 val $res = Scrape::crawl "https://example.com",
     limit => 50, depth => 3, delay => 200, concurrency => 4
-say "crawled $res->{count} pages"
+p "crawled $res->{count} pages"
 
 # 6. Just the link graph (no bodies).
 val $map = Scrape::links "https://example.com", limit => 200

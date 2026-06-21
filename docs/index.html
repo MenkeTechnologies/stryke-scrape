@@ -103,7 +103,11 @@ p $res-&gt;{count}          # pages fetched, robots respected</code></pre>
           <tr><td>extract_images</td><td>every <code>&lt;img&gt;</code> as <code>{ src, alt }</code>, resolved against a <code>base</code>.</td></tr>
           <tr><td>extract_feeds</td><td>RSS/Atom <code>&lt;link rel="alternate"&gt;</code> feed discovery.</td></tr>
           <tr><td>structured</td><td>JSON-LD blocks + OpenGraph + Twitter card metadata.</td></tr>
+          <tr><td>microdata</td><td>schema.org <code>itemscope</code>/<code>itemprop</code> items as <code>{ type, properties }</code>.</td></tr>
+          <tr><td>headings</td><td><code>h1</code>&hellip;<code>h6</code> outline as <code>{ level, text, id }</code> in document order.</td></tr>
+          <tr><td>forms</td><td>every <code>&lt;form&gt;</code> as <code>{ action, method, fields }</code>, action resolved against a <code>base</code>.</td></tr>
           <tr><td>select</td><td>outer (or <code>inner</code>) HTML of every element matching a selector.</td></tr>
+          <tr><td>select_text</td><td>cleaned text of every match of a selector, one string per match.</td></tr>
           <tr><td>absolutize</td><td>resolve a relative <code>href</code> against a <code>base</code> URL.</td></tr>
         </table>
       </section>
@@ -117,9 +121,9 @@ p $res-&gt;{count}          # pages fetched, robots respected</code></pre>
         <h2>API surface</h2>
         <table class="example-tbl">
           <tr><td>Network</td><td><code>fetch</code>, <code>crawl</code>, <code>links</code>, <code>sitemap</code></td></tr>
-          <tr><td>Extract</td><td><code>extract</code>, <code>extract_table</code>, <code>extract_links</code>, <code>extract_attrs</code>, <code>extract_text</code>, <code>extract_meta</code>, <code>extract_images</code>, <code>extract_feeds</code>, <code>structured</code></td></tr>
-          <tr><td>URL</td><td><code>url_parse</code>, <code>url_encode</code>, <code>url_decode</code>, <code>parse_query</code>, <code>build_query</code>, <code>absolutize</code></td></tr>
-          <tr><td>Utility</td><td><code>select</code>, <code>version</code></td></tr>
+          <tr><td>Extract</td><td><code>extract</code>, <code>extract_table</code>, <code>extract_links</code>, <code>extract_attrs</code>, <code>extract_text</code>, <code>extract_meta</code>, <code>extract_images</code>, <code>extract_feeds</code>, <code>structured</code>, <code>microdata</code>, <code>headings</code>, <code>forms</code></td></tr>
+          <tr><td>URL</td><td><code>url_parse</code>, <code>url_encode</code>, <code>url_decode</code>, <code>parse_query</code>, <code>build_query</code>, <code>absolutize</code>, <code>same_origin</code>, <code>normalize_url</code>, <code>set_query_params</code></td></tr>
+          <tr><td>Utility</td><td><code>select</code>, <code>select_text</code>, <code>version</code></td></tr>
         </table>
         <p>The full API lives in the <a href="https://github.com/MenkeTechnologies/stryke-scrape#readme" target="_blank" rel="noopener noreferrer">README</a>.</p>
       </section>

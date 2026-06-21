@@ -27,11 +27,18 @@ exports = [
     "scrape__extract_feeds",
     "scrape__absolutize",
     "scrape__select",
+    "scrape__select_text",
+    "scrape__headings",
+    "scrape__forms",
+    "scrape__microdata",
     "scrape__url_encode",
     "scrape__url_decode",
     "scrape__parse_query",
     "scrape__build_query",
     "scrape__url_parse",
+    "scrape__same_origin",
+    "scrape__normalize_url",
+    "scrape__set_query_params",
 ]
 
 [scripts]

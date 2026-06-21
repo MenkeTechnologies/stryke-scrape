@@ -51,7 +51,8 @@ to stryke, then layers HTML extraction on top. Two halves:
   single embedded tokio runtime owned by the cdylib.
 - **Pure** (`extract`, `extract_table`, `extract_links`, `extract_attrs`,
   `extract_text`, `extract_meta`, `extract_images`, `extract_feeds`,
-  `structured`, `select`, `absolutize`) run html5ever-backed CSS selection over
+  `structured`, `microdata`, `headings`, `forms`, `select`, `select_text`,
+  `absolutize`) run html5ever-backed CSS selection over
   an HTML string with no network — the unit-tested core, usable on any HTML you
   already have.
 
@@ -157,7 +158,11 @@ Scrape::extract_meta    $html → { title, description, canonical, ... }
 Scrape::extract_images  $html, %opts → [ { src, alt }, ... ]     # opts: base
 Scrape::extract_feeds   $html, %opts → [ { title, href, type }, ... ]   # opts: base
 Scrape::structured      $html → { jsonld => [...], opengraph => {...}, twitter => {...} }
+Scrape::microdata       $html → [ { type, properties => { name => [values] } }, ... ]   # schema.org itemscope
+Scrape::headings        $html → [ { level, text, id }, ... ]              # h1..h6 outline
+Scrape::forms           $html, %opts → [ { action, method, fields => [...] }, ... ]   # opts: base
 Scrape::select          $html, $selector, %opts → [ html, ... ]   # opts: inner
+Scrape::select_text     $html, $selector → [ text, ... ]          # one cleaned string per match
 Scrape::absolutize      $base, $href → $url
 
 # URL / query-string helpers (pure)
@@ -166,6 +171,9 @@ Scrape::url_decode      $value, %opts → $decoded             # opts: plus_as_s
 Scrape::parse_query     $query → { key => value, ... }
 Scrape::build_query     \%params → $query_string
 Scrape::url_parse       $url → { scheme, host, port, path, query, fragment, username, password }
+Scrape::same_origin     $a, $b → $bool                       # tuple scheme+host+port match
+Scrape::normalize_url   $url → $canonical                    # dedup: lowercase host, drop default port + fragment, sort query
+Scrape::set_query_params $url, \%params, %opts → $url         # opts: replace (default true)
 
 Scrape::version → $semver
 ```

@@ -18,6 +18,13 @@ assert_ok exists &Scrape::extract_table, "Scrape::extract_table exists"
 assert_ok exists &Scrape::extract_links, "Scrape::extract_links exists"
 assert_ok exists &Scrape::extract_attrs, "Scrape::extract_attrs exists"
 assert_ok exists &Scrape::structured, "Scrape::structured exists"
+assert_ok exists &Scrape::select_text, "Scrape::select_text exists"
+assert_ok exists &Scrape::headings, "Scrape::headings exists"
+assert_ok exists &Scrape::forms, "Scrape::forms exists"
+assert_ok exists &Scrape::microdata, "Scrape::microdata exists"
+assert_ok exists &Scrape::same_origin, "Scrape::same_origin exists"
+assert_ok exists &Scrape::normalize_url, "Scrape::normalize_url exists"
+assert_ok exists &Scrape::set_query_params, "Scrape::set_query_params exists"
 
 # ── version (cdylib loaded) ────────────────────────────────
 assert_ok Scrape::version(), "Scrape::version returns truthy (cdylib loaded)"
@@ -61,5 +68,37 @@ assert_eq scalar(@$hrefs), 2, "two hrefs collected"
 val $s = Scrape::structured($html)
 assert_eq $s->{opengraph}{title}, "Widget", "opengraph title"
 assert_eq $s->{jsonld}[0]{name}, "Widget", "json-ld product name"
+
+# ── select_text: one string per match ──────────────────────
+val $texts = Scrape::select_text('<ul><li> a  b </li><li>c</li></ul>', "li")
+assert_eq scalar(@$texts), 2, "select_text two matches"
+assert_eq $texts->[0], "a b", "select_text collapses whitespace"
+
+# ── headings: outline ──────────────────────────────────────
+val $heads = Scrape::headings('<h1 id="t">Top</h1><h2>Sub</h2>')
+assert_eq scalar(@$heads), 2, "two headings"
+assert_eq $heads->[0]{level}, 1, "first heading level"
+assert_eq $heads->[0]{id}, "t", "first heading id"
+
+# ── forms: action/method/fields ────────────────────────────
+val $forms = Scrape::forms('<form action="/s" method="post"><input name="q" value="hi"></form>', base => "https://ex.com/")
+assert_eq $forms->[0]{action}, "https://ex.com/s", "form action absolutised"
+assert_eq $forms->[0]{method}, "POST", "form method upper-cased"
+assert_eq $forms->[0]{fields}[0]{name}, "q", "form field name"
+
+# ── microdata ──────────────────────────────────────────────
+val $md = Scrape::microdata('<div itemscope itemtype="https://schema.org/Person"><span itemprop="name">Ada</span></div>')
+assert_eq $md->[0]{type}, "https://schema.org/Person", "microdata type"
+assert_eq $md->[0]{properties}{name}[0], "Ada", "microdata property value"
+
+# ── same_origin ────────────────────────────────────────────
+assert_ok Scrape::same_origin("https://ex.com/a", "https://ex.com/b"), "same origin true"
+assert_ok !Scrape::same_origin("https://ex.com/a", "http://ex.com/a"), "scheme differs → false"
+
+# ── normalize_url ──────────────────────────────────────────
+assert_eq Scrape::normalize_url("https://EX.com:443/p?b=2&a=1#frag"), "https://ex.com/p?a=1&b=2", "normalize canonicalises"
+
+# ── set_query_params ───────────────────────────────────────
+assert_eq Scrape::set_query_params("https://ex.com/s?q=cats&page=1", { page => "2" }), "https://ex.com/s?q=cats&page=2", "replace existing param"
 
 test_run

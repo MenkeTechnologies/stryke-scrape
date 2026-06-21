@@ -147,6 +147,31 @@ fn Scrape::select ($html, $selector, %opts) {
     Scrape::_decode("select", scrape__select(to_json($r)))->{html}
 }
 
+## Cleaned text of every element matching $selector, as an array (one string
+## per match). Use this for list scraping where `extract_text` would join.
+fn Scrape::select_text ($html, $selector) {
+    val $r = { html => $html, selector => $selector }
+    Scrape::_decode("select_text", scrape__select_text(to_json($r)))->{text}
+}
+
+## Document outline: every `h1`..`h6` as `{ level, text, id }` in order.
+fn Scrape::headings ($html) {
+    Scrape::_decode("headings", scrape__headings(to_json({ html => $html })))->{headings}
+}
+
+## Every `<form>` as `{ action, method, fields => [ { name, type, value } ] }`.
+## With %opts{base}, the form action is resolved to an absolute URL.
+fn Scrape::forms ($html, %opts) {
+    val $r = { html => $html, base => $opts{base} }
+    Scrape::_decode("forms", scrape__forms(to_json($r)))->{forms}
+}
+
+## schema.org microdata: top-level `[itemscope]` elements as
+## `{ type, properties => { name => [values] } }`.
+fn Scrape::microdata ($html) {
+    Scrape::_decode("microdata", scrape__microdata(to_json({ html => $html })))->{items}
+}
+
 # ── URL / query-string helpers (pure) ─────────────────────────────────
 
 ## Percent-encode $value for a URL component (RFC 3986; space → %20).
@@ -174,4 +199,24 @@ fn Scrape::build_query ($params) {
 ## password }`.
 fn Scrape::url_parse ($url) {
     Scrape::_decode("url_parse", scrape__url_parse(to_json({ url => $url })))->{parts}
+}
+
+## True when $a and $b share the same tuple origin (scheme + host + port).
+## Opaque origins (data:/file:) are never same-origin. The crawler scope check.
+fn Scrape::same_origin ($a, $b) {
+    Scrape::_decode("same_origin", scrape__same_origin(to_json({ a => $a, b => $b })))->{same}
+}
+
+## Canonicalise $url for dedup: lowercase scheme/host, drop a default port,
+## remove the fragment, and sort query parameters by key.
+fn Scrape::normalize_url ($url) {
+    Scrape::_decode("normalize_url", scrape__normalize_url(to_json({ url => $url })))->{url}
+}
+
+## Merge $params (hashref) into the query string of $url. With %opts{replace}
+## true (default) new keys override existing ones; with replace false the pairs
+## are appended. Returns the rebuilt URL.
+fn Scrape::set_query_params ($url, $params, %opts) {
+    val $r = { url => $url, params => $params, replace => ($opts{replace} // 1) }
+    Scrape::_decode("set_query_params", scrape__set_query_params(to_json($r)))->{url}
 }

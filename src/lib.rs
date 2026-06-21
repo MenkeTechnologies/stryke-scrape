@@ -498,6 +498,133 @@ fn select_html(html: &str, selector: &str, inner: bool) -> Result<Value> {
     Ok(Value::Array(out))
 }
 
+/// Cleaned text content of every element matching `selector`, as an array.
+/// Where `extract_text` joins all matches into one string and `select` returns
+/// HTML, this gives one whitespace-collapsed text string per match — the shape
+/// you want when scraping a list (`li`, `.row .title`, …).
+fn select_text(html: &str, selector: &str) -> Result<Value> {
+    let doc = Html::parse_document(html);
+    let sel = Selector::parse(selector).map_err(|e| anyhow!("bad selector {selector:?}: {e:?}"))?;
+    let out: Vec<Value> = doc
+        .select(&sel)
+        .map(|el| Value::String(visible_text(&el)))
+        .collect();
+    Ok(Value::Array(out))
+}
+
+/// Document outline: every `h1`..`h6` as `{ level, text, id }` in document
+/// order. `level` is the integer 1..6; `id` is the heading's `id` attribute or
+/// null. Useful for table-of-contents building and SEO heading audits.
+fn extract_headings(html: &str) -> Result<Value> {
+    let doc = Html::parse_document(html);
+    let sel = Selector::parse("h1,h2,h3,h4,h5,h6").unwrap();
+    let mut out = Vec::new();
+    for el in doc.select(&sel) {
+        let name = el.value().name();
+        // tag name is exactly "h" + one digit for this selector
+        let level = name[1..].parse::<u8>().unwrap_or(0);
+        out.push(json!({
+            "level": level,
+            "text": clean_text(&el),
+            "id": el.value().attr("id"),
+        }));
+    }
+    Ok(Value::Array(out))
+}
+
+/// Every `<form>` as `{ action, method, fields: [ { name, type, value } ] }`.
+/// `method` is upper-cased and defaults to GET (HTML default). `fields` covers
+/// `input`/`select`/`textarea`; `select` reports type `select`, `textarea`
+/// reports type `textarea`, and an `input` without a `type` defaults to `text`.
+/// With `base`, the form `action` is resolved to an absolute URL.
+fn extract_forms(html: &str, base: Option<&str>) -> Result<Value> {
+    let doc = Html::parse_document(html);
+    let form_sel = Selector::parse("form").unwrap();
+    let field_sel = Selector::parse("input,select,textarea").unwrap();
+    let base_url = parse_base(base)?;
+
+    let mut forms = Vec::new();
+    for form in doc.select(&form_sel) {
+        let action_raw = form.value().attr("action").unwrap_or("");
+        let action = if action_raw.is_empty() {
+            Value::Null
+        } else {
+            match resolve(&base_url, action_raw) {
+                Some(u) => json!(u),
+                None => json!(action_raw),
+            }
+        };
+        let method = form
+            .value()
+            .attr("method")
+            .unwrap_or("get")
+            .to_ascii_uppercase();
+
+        let mut fields = Vec::new();
+        for f in form.select(&field_sel) {
+            let tag = f.value().name();
+            let ty = match tag {
+                "select" => "select".to_string(),
+                "textarea" => "textarea".to_string(),
+                _ => f.value().attr("type").unwrap_or("text").to_string(),
+            };
+            let value = match tag {
+                "textarea" => Some(clean_text(&f)),
+                _ => f.value().attr("value").map(String::from),
+            };
+            fields.push(json!({
+                "name": f.value().attr("name"),
+                "type": ty,
+                "value": value,
+            }));
+        }
+        forms.push(json!({ "action": action, "method": method, "fields": fields }));
+    }
+    Ok(Value::Array(forms))
+}
+
+/// schema.org microdata: every top-level `[itemscope]` element (one not nested
+/// inside another `itemscope`) as `{ type, properties: { name: [values] } }`.
+/// A property value is the `content`/`href`/`src`/`datetime` attribute when
+/// present (in that order), else the element's text. Complements `structured`
+/// (JSON-LD + OpenGraph) with the inline-attribute form.
+fn extract_microdata(html: &str) -> Result<Value> {
+    let doc = Html::parse_document(html);
+    let scope_sel = Selector::parse("[itemscope]").unwrap();
+    let prop_sel = Selector::parse("[itemprop]").unwrap();
+
+    let mut items = Vec::new();
+    for scope in doc.select(&scope_sel) {
+        // top-level only: skip scopes nested in another itemscope
+        let nested = scope
+            .ancestors()
+            .filter_map(ElementRef::wrap)
+            .any(|a| a.value().attr("itemscope").is_some());
+        if nested {
+            continue;
+        }
+        let itemtype = scope.value().attr("itemtype");
+        let mut props: BTreeMap<String, Vec<Value>> = BTreeMap::new();
+        for p in scope.select(&prop_sel) {
+            let Some(name) = p.value().attr("itemprop") else {
+                continue;
+            };
+            let val = p
+                .value()
+                .attr("content")
+                .or_else(|| p.value().attr("href"))
+                .or_else(|| p.value().attr("src"))
+                .or_else(|| p.value().attr("datetime"))
+                .map(String::from)
+                .unwrap_or_else(|| clean_text(&p));
+            props.entry(name.to_string()).or_default().push(json!(val));
+        }
+        let props_obj: Map<String, Value> = props.into_iter().map(|(k, v)| (k, json!(v))).collect();
+        items.push(json!({ "type": itemtype, "properties": props_obj }));
+    }
+    Ok(Value::Array(items))
+}
+
 // ── URL / query-string helpers (pure; no network) ────────────────────────────
 
 fn hex_val(b: u8) -> Option<u8> {
@@ -602,6 +729,104 @@ fn url_parse(s: &str) -> Result<Value> {
         "username": (!u.username().is_empty()).then(|| u.username().to_string()),
         "password": u.password(),
     }))
+}
+
+/// True when both URLs share the same tuple origin (scheme + host + port).
+/// Opaque/non-tuple origins (e.g. `data:`, `file:`) never count as same-origin,
+/// matching the web's same-origin policy. The core scope check for a crawler.
+fn same_origin(a: &str, b: &str) -> Result<bool> {
+    let ua = Url::parse(a).map_err(|e| anyhow!("bad url {a:?}: {e}"))?;
+    let ub = Url::parse(b).map_err(|e| anyhow!("bad url {b:?}: {e}"))?;
+    let oa = ua.origin();
+    let ob = ub.origin();
+    Ok(oa.is_tuple() && ob.is_tuple() && oa == ob)
+}
+
+/// Canonicalise a URL for dedup: lowercase scheme + host (done by `url`), drop a
+/// default port, remove the fragment, and sort query parameters by key (stable
+/// within equal keys). Two URLs that differ only in those respects normalise to
+/// the same string — what a crawler's visited-set needs.
+fn normalize_url(s: &str) -> Result<String> {
+    let mut u = Url::parse(s).map_err(|e| anyhow!("bad url {s:?}: {e}"))?;
+    u.set_fragment(None);
+    // Drop an explicit port that equals the scheme default.
+    if let (Some(port), Some(def)) = (u.port(), default_port(u.scheme())) {
+        if port == def {
+            let _ = u.set_port(None);
+        }
+    }
+    // Sort query params by key, preserving relative order of equal keys.
+    if u.query().is_some() {
+        let mut pairs: Vec<(String, String)> = u
+            .query_pairs()
+            .map(|(k, v)| (k.into_owned(), v.into_owned()))
+            .collect();
+        if pairs.is_empty() {
+            u.set_query(None);
+        } else {
+            pairs.sort_by(|a, b| a.0.cmp(&b.0));
+            let mut qp = u.query_pairs_mut();
+            qp.clear();
+            for (k, v) in &pairs {
+                qp.append_pair(k, v);
+            }
+            drop(qp);
+        }
+    }
+    Ok(u.to_string())
+}
+
+/// The default port for the common URL schemes, used by `normalize_url`.
+fn default_port(scheme: &str) -> Option<u16> {
+    match scheme {
+        "http" | "ws" => Some(80),
+        "https" | "wss" => Some(443),
+        "ftp" => Some(21),
+        _ => None,
+    }
+}
+
+/// Merge `params` into the query string of `url`. With `replace` true the new
+/// params override existing keys (others kept); with `replace` false the new
+/// pairs are appended (duplicate keys allowed). Returns the rebuilt URL.
+fn set_query_params(url: &str, params: &Map<String, Value>, replace: bool) -> Result<String> {
+    let mut u = Url::parse(url).map_err(|e| anyhow!("bad url {url:?}: {e}"))?;
+    let new_str = |v: &Value| -> String {
+        match v {
+            Value::String(s) => s.clone(),
+            Value::Null => String::new(),
+            other => other.to_string(),
+        }
+    };
+
+    if replace {
+        // keep existing pairs whose key is not being overridden
+        let kept: Vec<(String, String)> = u
+            .query_pairs()
+            .filter(|(k, _)| !params.contains_key(k.as_ref()))
+            .map(|(k, v)| (k.into_owned(), v.into_owned()))
+            .collect();
+        u.set_query(None);
+        let mut qp = u.query_pairs_mut();
+        for (k, v) in &kept {
+            qp.append_pair(k, v);
+        }
+        for (k, v) in params {
+            qp.append_pair(k, &new_str(v));
+        }
+        drop(qp);
+    } else {
+        let mut qp = u.query_pairs_mut();
+        for (k, v) in params {
+            qp.append_pair(k, &new_str(v));
+        }
+        drop(qp);
+    }
+    // An empty query string ("?") is noise; strip it.
+    if u.query() == Some("") {
+        u.set_query(None);
+    }
+    Ok(u.to_string())
 }
 
 // ── exports: version ─────────────────────────────────────────────────────────
@@ -840,6 +1065,55 @@ pub extern "C" fn scrape__select(args: *const c_char) -> *const c_char {
 }
 
 #[no_mangle]
+pub extern "C" fn scrape__select_text(args: *const c_char) -> *const c_char {
+    ffi_call(args, |v| {
+        let html = v
+            .get("html")
+            .and_then(|x| x.as_str())
+            .ok_or_else(|| anyhow!("missing html"))?;
+        let selector = v
+            .get("selector")
+            .and_then(|x| x.as_str())
+            .ok_or_else(|| anyhow!("missing selector"))?;
+        Ok(json!({ "text": select_text(html, selector)? }))
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn scrape__headings(args: *const c_char) -> *const c_char {
+    ffi_call(args, |v| {
+        let html = v
+            .get("html")
+            .and_then(|x| x.as_str())
+            .ok_or_else(|| anyhow!("missing html"))?;
+        Ok(json!({ "headings": extract_headings(html)? }))
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn scrape__forms(args: *const c_char) -> *const c_char {
+    ffi_call(args, |v| {
+        let html = v
+            .get("html")
+            .and_then(|x| x.as_str())
+            .ok_or_else(|| anyhow!("missing html"))?;
+        let base = v.get("base").and_then(|x| x.as_str());
+        Ok(json!({ "forms": extract_forms(html, base)? }))
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn scrape__microdata(args: *const c_char) -> *const c_char {
+    ffi_call(args, |v| {
+        let html = v
+            .get("html")
+            .and_then(|x| x.as_str())
+            .ok_or_else(|| anyhow!("missing html"))?;
+        Ok(json!({ "items": extract_microdata(html)? }))
+    })
+}
+
+#[no_mangle]
 pub extern "C" fn scrape__url_encode(args: *const c_char) -> *const c_char {
     ffi_call(args, |v| {
         let s = v
@@ -895,6 +1169,48 @@ pub extern "C" fn scrape__url_parse(args: *const c_char) -> *const c_char {
             .and_then(|x| x.as_str())
             .ok_or_else(|| anyhow!("missing url"))?;
         Ok(json!({ "parts": url_parse(url)? }))
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn scrape__same_origin(args: *const c_char) -> *const c_char {
+    ffi_call(args, |v| {
+        let a = v
+            .get("a")
+            .and_then(|x| x.as_str())
+            .ok_or_else(|| anyhow!("missing a"))?;
+        let b = v
+            .get("b")
+            .and_then(|x| x.as_str())
+            .ok_or_else(|| anyhow!("missing b"))?;
+        Ok(json!({ "same": same_origin(a, b)? }))
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn scrape__normalize_url(args: *const c_char) -> *const c_char {
+    ffi_call(args, |v| {
+        let url = v
+            .get("url")
+            .and_then(|x| x.as_str())
+            .ok_or_else(|| anyhow!("missing url"))?;
+        Ok(json!({ "url": normalize_url(url)? }))
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn scrape__set_query_params(args: *const c_char) -> *const c_char {
+    ffi_call(args, |v| {
+        let url = v
+            .get("url")
+            .and_then(|x| x.as_str())
+            .ok_or_else(|| anyhow!("missing url"))?;
+        let params = v
+            .get("params")
+            .and_then(|x| x.as_object())
+            .ok_or_else(|| anyhow!("missing params object"))?;
+        let replace = v.get("replace").and_then(|x| x.as_bool()).unwrap_or(true);
+        Ok(json!({ "url": set_query_params(url, params, replace)? }))
     })
 }
 
@@ -1118,5 +1434,130 @@ mod tests {
         assert_eq!(v["fragment"], json!("frag"));
         assert_eq!(v["username"], json!("user"));
         assert_eq!(v["password"], json!("pw"));
+    }
+
+    #[test]
+    fn select_text_one_string_per_match() {
+        let html = r#"<ul><li> a  b </li><li>c</li></ul>"#;
+        let v = select_text(html, "li").unwrap();
+        assert_eq!(v, json!(["a b", "c"]));
+    }
+
+    #[test]
+    fn headings_capture_level_text_and_id() {
+        let html = r#"<body><h1 id="top">Title</h1><h2>Sub  one</h2><h3>Deep</h3></body>"#;
+        let v = extract_headings(html).unwrap();
+        let arr = v.as_array().unwrap();
+        assert_eq!(arr.len(), 3);
+        assert_eq!(arr[0], json!({"level": 1, "text": "Title", "id": "top"}));
+        assert_eq!(arr[1], json!({"level": 2, "text": "Sub one", "id": null}));
+        assert_eq!(arr[2]["level"], json!(3));
+    }
+
+    #[test]
+    fn forms_capture_action_method_and_fields() {
+        let html = r##"<form action="/search" method="post">
+            <input name="q" value="hi">
+            <input name="page">
+            <select name="sort"><option>a</option></select>
+            <textarea name="body">note  text</textarea>
+        </form>"##;
+        let v = extract_forms(html, Some("https://ex.com/")).unwrap();
+        let f = &v.as_array().unwrap()[0];
+        assert_eq!(f["action"], json!("https://ex.com/search"));
+        assert_eq!(f["method"], json!("POST"));
+        let fields = f["fields"].as_array().unwrap();
+        assert_eq!(
+            fields[0],
+            json!({"name": "q", "type": "text", "value": "hi"})
+        );
+        assert_eq!(
+            fields[1],
+            json!({"name": "page", "type": "text", "value": null})
+        );
+        assert_eq!(fields[2]["type"], json!("select"));
+        assert_eq!(
+            fields[3],
+            json!({"name": "body", "type": "textarea", "value": "note text"})
+        );
+    }
+
+    #[test]
+    fn forms_default_method_get_and_empty_action() {
+        let html = r#"<form><input name="x"></form>"#;
+        let v = extract_forms(html, None).unwrap();
+        let f = &v.as_array().unwrap()[0];
+        assert_eq!(f["method"], json!("GET"));
+        assert_eq!(f["action"], Value::Null);
+    }
+
+    #[test]
+    fn microdata_top_level_items_only() {
+        let html = r##"<div itemscope itemtype="https://schema.org/Person">
+            <span itemprop="name">Ada</span>
+            <a itemprop="url" href="https://ada.example/">site</a>
+            <time itemprop="born" datetime="1815-12-10">long ago</time>
+            <div itemscope itemtype="https://schema.org/PostalAddress">
+                <span itemprop="city">London</span>
+            </div>
+        </div>"##;
+        let v = extract_microdata(html).unwrap();
+        let arr = v.as_array().unwrap();
+        // only the outer Person scope is top-level
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["type"], json!("https://schema.org/Person"));
+        let props = &arr[0]["properties"];
+        assert_eq!(props["name"], json!(["Ada"]));
+        assert_eq!(props["url"], json!(["https://ada.example/"]));
+        assert_eq!(props["born"], json!(["1815-12-10"]));
+        // nested PostalAddress city is captured under the parent (descendant scan)
+        assert_eq!(props["city"], json!(["London"]));
+    }
+
+    #[test]
+    fn same_origin_matches_scheme_host_port() {
+        assert!(same_origin("https://ex.com/a", "https://ex.com/b?x=1").unwrap());
+        assert!(same_origin("https://ex.com:443/a", "https://ex.com/b").unwrap());
+        assert!(!same_origin("https://ex.com/a", "http://ex.com/a").unwrap());
+        assert!(!same_origin("https://ex.com/a", "https://other.com/a").unwrap());
+        assert!(!same_origin("https://ex.com:8443/a", "https://ex.com/a").unwrap());
+    }
+
+    #[test]
+    fn normalize_url_canonicalises() {
+        assert_eq!(
+            normalize_url("https://EX.com:443/p?b=2&a=1#frag").unwrap(),
+            "https://ex.com/p?a=1&b=2"
+        );
+        assert_eq!(
+            normalize_url("http://ex.com:80/").unwrap(),
+            "http://ex.com/"
+        );
+        // non-default port preserved
+        assert_eq!(
+            normalize_url("https://ex.com:8443/x").unwrap(),
+            "https://ex.com:8443/x"
+        );
+    }
+
+    #[test]
+    fn set_query_params_replace_and_append() {
+        let mut p = Map::new();
+        p.insert("page".into(), json!("2"));
+        // replace: override existing page, keep q
+        assert_eq!(
+            set_query_params("https://ex.com/s?q=cats&page=1", &p, true).unwrap(),
+            "https://ex.com/s?q=cats&page=2"
+        );
+        // append: both pages present
+        assert_eq!(
+            set_query_params("https://ex.com/s?page=1", &p, false).unwrap(),
+            "https://ex.com/s?page=1&page=2"
+        );
+        // adds query to a URL that had none
+        assert_eq!(
+            set_query_params("https://ex.com/s", &p, true).unwrap(),
+            "https://ex.com/s?page=2"
+        );
     }
 }

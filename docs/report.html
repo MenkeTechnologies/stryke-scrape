@@ -101,11 +101,32 @@
         <div class="stat-card"><div class="stat-val cyan">opt-in</div><div class="stat-label">Tier</div></div>
         <div class="stat-card"><div class="stat-val">cdylib</div><div class="stat-label">Load model (dlopen)</div></div>
         <div class="stat-card"><div class="stat-val green">spider</div><div class="stat-label">Crawl engine (tokio)</div></div>
+        <div class="stat-card"><div class="stat-val">28</div><div class="stat-label">FFI exports / wrappers</div></div>
+        <div class="stat-card"><div class="stat-val cyan">4</div><div class="stat-label">Network functions</div></div>
+        <div class="stat-card"><div class="stat-val">15</div><div class="stat-label">Pure extraction functions</div></div>
+        <div class="stat-card"><div class="stat-val green">8</div><div class="stat-label">URL / query helpers</div></div>
       </div>
+      <p>The surface is symmetric: each of the 28 <code>scrape__*</code> <code>extern "C"</code> exports in <code>src/lib.rs</code> is registered in <code>stryke.toml</code>'s <code>[ffi]</code> table and has exactly one <code>Scrape::*</code> wrapper in <code>lib/Scrape.stk</code>. The offline surface test (<code>t/test_stryke_scrape_surface.stk</code>) pins this completeness so the wrapper layer never drifts from the cdylib.</p>
 
       <hr class="section-rule">
       <h2 class="tutorial-title"><span class="step-hash">~</span>THE CRAWL ENGINE</h2>
-      <p>Crawling is <a href="https://github.com/spider-rs/spider" target="_blank" rel="noopener noreferrer">spider</a>, vendored as a dependency. This package does not reimplement a crawler &mdash; it configures a <code>spider::website::Website</code> from the request dict (limit, depth, subdomains, robots, delay, concurrency, timeout, blacklist, proxies, user-agent) and calls <code>scrape()</code>, <code>crawl()</code>, or <code>crawl_sitemap()</code>. Results come back as <code>{ url, status, html? }</code> per page.</p>
+      <p>Crawling is <a href="https://github.com/spider-rs/spider" target="_blank" rel="noopener noreferrer">spider</a> (version 2, with the <code>sitemap</code> feature), vendored as a dependency. This package does not reimplement a crawler &mdash; it configures a <code>spider::website::Website</code> from the request dict and calls <code>scrape()</code>, <code>crawl()</code>, or <code>crawl_sitemap()</code>. Results come back as <code>{ url, status, html? }</code> per page; <code>html</code> is omitted when <code>include_html</code> is false, so a large site can be link-mapped without hauling every body.</p>
+      <p>The <code>build_website</code> helper maps each request key onto a spider builder call &mdash; only keys present in the request are applied, the rest fall back to spider's own defaults plus this package's courteous overrides:</p>
+      <table class="arch-table">
+        <thead><tr><th>Request key</th><th>spider builder call</th></tr></thead>
+        <tbody>
+          <tr><td>limit</td><td><code>with_limit</code></td></tr>
+          <tr><td>depth</td><td><code>with_depth</code></td></tr>
+          <tr><td>subdomains</td><td><code>with_subdomains</code></td></tr>
+          <tr><td>respect_robots</td><td><code>with_respect_robots_txt</code> (defaults true)</td></tr>
+          <tr><td>delay</td><td><code>with_delay</code> (ms between requests)</td></tr>
+          <tr><td>concurrency</td><td><code>with_concurrency_limit</code></td></tr>
+          <tr><td>timeout_ms</td><td><code>with_request_timeout</code></td></tr>
+          <tr><td>blacklist</td><td><code>with_blacklist_url</code></td></tr>
+          <tr><td>proxies</td><td><code>with_proxies</code></td></tr>
+          <tr><td>user_agent</td><td><code>with_user_agent</code> (defaults <code>stryke-scrape/&lt;version&gt;</code>)</td></tr>
+        </tbody>
+      </table>
 
       <hr class="section-rule">
       <h2 class="tutorial-title"><span class="step-hash">~</span>ONE RUNTIME, SYNCHRONOUS SURFACE</h2>
@@ -117,20 +138,36 @@
 
       <hr class="section-rule">
       <h2 class="tutorial-title"><span class="step-hash">&amp;</span>PURE EXTRACTION</h2>
-      <p>The <code>extract</code> family runs html5ever-backed CSS selection (the <code>scraper</code> crate) over an HTML string with no network. These are pure functions &mdash; unit-tested in the crate and exercised by the offline surface test with nothing to connect to.</p>
+      <p>The extraction family runs html5ever-backed CSS selection (the <code>scraper</code> crate) over an HTML string with no network. These are pure functions &mdash; unit-tested in the crate and exercised by the offline surface test with nothing to connect to.</p>
       <table class="arch-table">
         <thead><tr><th>Engine</th><th>Behavior</th></tr></thead>
         <tbody>
-          <tr><td>extract</td><td>CSS selection; selector specs carry an optional trailing <code>@attr</code> to pull an attribute instead of text</td></tr>
-          <tr><td>extract_table</td><td>maps a <code>&lt;table&gt;</code> to header-keyed records</td></tr>
-          <tr><td>extract_links</td><td>resolves relative hrefs against a base via the <code>url</code> crate</td></tr>
-          <tr><td>structured</td><td>parses JSON-LD script blocks and OpenGraph / Twitter meta tags</td></tr>
+          <tr><td>extract</td><td>CSS selection per a <code>{ name =&gt; selector }</code> map; selector specs carry an optional trailing <code>@attr</code> to pull an attribute instead of text; <code>all</code> returns every match as an array</td></tr>
+          <tr><td>extract_table</td><td>maps a <code>&lt;table&gt;</code> to header-keyed records, falling back to <code>col0</code>, <code>col1</code>&hellip; for headerless columns</td></tr>
+          <tr><td>extract_links</td><td>every <code>&lt;a href&gt;</code> as <code>{ text, href }</code>; relative hrefs resolved against a base via the <code>url</code> crate</td></tr>
+          <tr><td>extract_attrs</td><td>collect one attribute across every match of a selector</td></tr>
+          <tr><td>extract_text</td><td>readable text of a selector (default <code>body</code>); whitespace collapsed, <code>script</code>/<code>style</code>/<code>noscript</code> subtrees skipped</td></tr>
+          <tr><td>extract_meta</td><td>head metadata: <code>title</code>, <code>description</code>, <code>keywords</code>, <code>robots</code>, <code>viewport</code>, <code>generator</code>, <code>charset</code>, <code>canonical</code> &mdash; present fields only</td></tr>
+          <tr><td>extract_images</td><td>every <code>&lt;img&gt;</code> as <code>{ src, alt }</code>, src resolved against a base</td></tr>
+          <tr><td>extract_feeds</td><td>RSS/Atom <code>&lt;link rel="alternate"&gt;</code> feed discovery as <code>{ title, href, type }</code></td></tr>
+          <tr><td>structured</td><td>JSON-LD script blocks plus OpenGraph (<code>og:</code>) and Twitter-card (<code>twitter:</code>) meta tags, prefixes stripped</td></tr>
+          <tr><td>microdata</td><td>schema.org <code>itemscope</code>/<code>itemprop</code> items as <code>{ type, properties }</code></td></tr>
+          <tr><td>headings</td><td><code>h1</code>&hellip;<code>h6</code> outline as <code>{ level, text, id }</code> in document order</td></tr>
+          <tr><td>forms</td><td>every <code>&lt;form&gt;</code> as <code>{ action, method, fields }</code>; method upper-cased, action resolved against a base</td></tr>
+          <tr><td>select</td><td>outer (or <code>inner</code>) HTML of every element matching a selector</td></tr>
+          <tr><td>select_text</td><td>cleaned text of every match, one string per match (list scraping)</td></tr>
+          <tr><td>absolutize</td><td>resolve a relative <code>href</code> against a <code>base</code> URL via the <code>url</code> crate</td></tr>
         </tbody>
       </table>
+      <p>A parallel set of pure URL / query-string helpers &mdash; <code>url_parse</code>, <code>url_encode</code>, <code>url_decode</code>, <code>parse_query</code>, <code>build_query</code>, <code>same_origin</code>, <code>normalize_url</code>, <code>set_query_params</code> &mdash; rounds out the surface for building, comparing, and deduplicating the URLs a crawl yields. <code>normalize_url</code> lowercases the host, drops a scheme-default port and the fragment, and sorts query keys for stable dedup.</p>
 
       <hr class="section-rule">
       <h2 class="tutorial-title"><span class="step-hash">/</span>DEPENDENCIES</h2>
-      <p><code>spider</code> (crawl engine, with <code>sitemap</code>), <code>scraper</code> (html5ever CSS selection), <code>url</code> (link resolution), <code>tokio</code> (the embedded runtime), <code>serde</code> / <code>serde_json</code> for the FFI payloads, <code>anyhow</code> + <code>once_cell</code> for error handling and the runtime cell.</p>
+      <p><code>spider</code> 2 (crawl engine, with <code>sitemap</code>), <code>scraper</code> 0.20 (html5ever CSS selection), <code>url</code> 2 (link resolution), <code>tokio</code> 1 with <code>rt-multi-thread</code> (the embedded runtime), <code>serde</code> / <code>serde_json</code> (with <code>preserve_order</code>) for the FFI payloads, <code>anyhow</code> + <code>once_cell</code> for error handling and the runtime cell. The release profile is tuned for a small, fast shared object: <code>opt-level = 3</code>, thin LTO, a single codegen unit, stripped symbols, and <code>panic = "abort"</code>.</p>
+
+      <hr class="section-rule">
+      <h2 class="tutorial-title"><span class="step-hash">%</span>BUILD AND TEST</h2>
+      <p>The cdylib builds with <code>cargo build --release</code> (or <code>make</code>); <code>make install</code> wraps <code>s pkg install -g .</code>. Tests split along the network boundary: <code>cargo test</code> exercises the pure extraction engines in-crate with no egress, <code>s test t/</code> runs the wrapper surface and offline extraction, and setting <code>SCRAPE_LIVE_URL</code> opts into a live crawl. CI runs the no-network paths so it stays green offline.</p>
 
       <hr class="section-rule">
       <h2 class="tutorial-title"><span class="step-hash">#</span>PROJECT METADATA</h2>
@@ -138,6 +175,8 @@
         <thead><tr><th>Item</th><th>Value</th></tr></thead>
         <tbody>
           <tr><td>License</td><td>MIT</td></tr>
+          <tr><td>Version</td><td>0.3.0</td></tr>
+          <tr><td>Namespace</td><td><code>Scrape</code> (cdylib <code>libstryke_scrape</code>)</td></tr>
           <tr><td>Repository</td><td><a href="https://github.com/MenkeTechnologies/stryke-scrape" target="_blank" rel="noopener noreferrer">github.com/MenkeTechnologies/stryke-scrape</a></td></tr>
           <tr><td>Parent language</td><td><a href="https://github.com/MenkeTechnologies/strykelang" target="_blank" rel="noopener noreferrer">strykelang</a></td></tr>
           <tr><td>Meta umbrella</td><td><a href="https://github.com/MenkeTechnologies/MenkeTechnologiesMeta" target="_blank" rel="noopener noreferrer">MenkeTechnologiesMeta</a></td></tr>

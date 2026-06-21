@@ -2,7 +2,7 @@
 name = "stryke-scrape"
 version = "0.2.0"
 edition = "2021"
-description = "Web scraping / crawling cdylib for stryke — fetch, crawl, sitemap, plus pure CSS / table / link / structured-data extraction. Wraps spider."
+description = "Web scraping / crawling cdylib for stryke — fetch, crawl, sitemap, plus pure CSS / table / link / structured-data extraction. Wraps spider"
 authors = ["MenkeTechnologies"]
 license = "MIT"
 repository = "https://github.com/MenkeTechnologies/stryke-scrape"

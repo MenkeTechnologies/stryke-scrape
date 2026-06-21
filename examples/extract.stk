@@ -21,22 +21,22 @@ val $rec = Scrape::extract($html, {
     title => "h1.title",
     price => "span.price",
 })
-say "title: $rec->{title}"
-say "price: $rec->{price}"
+p "title: $rec->{title}"
+p "price: $rec->{price}"
 
 # table → records
 val $rows = Scrape::extract_table($html)
 for val $r (@$rows) {
-    say "  $r->{Feature} = $r->{Value}"
+    p "  $r->{Feature} = $r->{Value}"
 }
 
 # links resolved against a base
 val $links = Scrape::extract_links($html, base => "https://acme.test/products/widget")
 for val $l (@$links) {
-    say "  link: $l->{text} -> $l->{href}"
+    p "  link: $l->{text} -> $l->{href}"
 }
 
 # structured metadata
 val $meta = Scrape::structured($html)
-say "og:title = $meta->{opengraph}{title}"
-say "og:price = $meta->{opengraph}{price}"
+p "og:title = $meta->{opengraph}{title}"
+p "og:price = $meta->{opengraph}{price}"

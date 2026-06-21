@@ -17,10 +17,10 @@ val $res = Scrape::crawl($url,
     delay       => 200,       # ms between requests
     concurrency => 4,
 )
-say "crawled $res->{count} pages"
+p "crawled $res->{count} pages"
 
 # pull the <title> out of each fetched page
 for val $p (@{ $res->{pages} }) {
     val $rec = Scrape::extract($p->{html}, { title => "title" })
-    say "  [$p->{status}] $p->{url} — $rec->{title}"
+    p "  [$p->{status}] $p->{url} — $rec->{title}"
 }

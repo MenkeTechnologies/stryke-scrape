@@ -380,7 +380,10 @@ fn extract_text(html: &str, selector: Option<&str>) -> Result<Value> {
         .map(|el| visible_text(&el))
         .collect::<Vec<_>>()
         .join(" ");
-    Ok(json!(joined.split_whitespace().collect::<Vec<_>>().join(" ")))
+    Ok(json!(joined
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")))
 }
 
 /// Standard `<head>` metadata: `title` plus the common SEO `<meta>`/`<link>`
@@ -867,7 +870,10 @@ mod tests {
         let v = extract_images(html, Some("https://ex.com/dir/")).unwrap();
         let arr = v.as_array().unwrap();
         assert_eq!(arr[0], json!({"src": "https://ex.com/a.png", "alt": "A"}));
-        assert_eq!(arr[1], json!({"src": "https://ex.com/dir/b.jpg", "alt": ""}));
+        assert_eq!(
+            arr[1],
+            json!({"src": "https://ex.com/dir/b.jpg", "alt": ""})
+        );
     }
 
     #[test]
@@ -888,7 +894,10 @@ mod tests {
     #[test]
     fn absolutize_resolves_relative() {
         let b = Url::parse("https://site.test/dir/page").unwrap();
-        assert_eq!(b.join("../x.html").unwrap().to_string(), "https://site.test/x.html");
+        assert_eq!(
+            b.join("../x.html").unwrap().to_string(),
+            "https://site.test/x.html"
+        );
     }
 
     #[test]

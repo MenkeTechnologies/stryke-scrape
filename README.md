@@ -23,6 +23,8 @@ structured data (JSON-LD, OpenGraph, Twitter cards). Opt-in package tier.
 
 ### [`strykelang`](https://github.com/MenkeTechnologies/strykelang) &middot; [`MenkeTechnologiesMeta`](https://github.com/MenkeTechnologies/MenkeTechnologiesMeta) · [`stryke-search`](https://github.com/MenkeTechnologies/stryke-search) · [`stryke-selenium`](https://github.com/MenkeTechnologies/stryke-selenium)
 
+### [`Read the Docs`](https://menketechnologies.github.io/stryke-scrape/) &middot; [`Engineering Report`](https://menketechnologies.github.io/stryke-scrape/report.html)
+
 ---
 
 ## Table of Contents
